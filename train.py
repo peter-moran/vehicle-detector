@@ -16,7 +16,7 @@ from scipy.stats import expon
 from skimage.feature import hog
 from sklearn.model_selection import RandomizedSearchCV
 from sklearn.model_selection import train_test_split
-from sklearn.preprocessing import StandardScaler
+from sklearn.preprocessing import scale
 from sklearn.svm import SVC
 from sklearn.utils import shuffle
 from tqdm import tqdm
@@ -73,9 +73,12 @@ class FeatureVectorBuilder:
     Sample = TypeVar('Sample')
     ProcessedSample = TypeVar('ProcessedSample')
 
-    def __init__(self, preprocessor_func: Callable[[Sample], ProcessedSample]):
+    def __init__(self, preprocessor_func: Callable[[Sample], ProcessedSample],
+                 normalize_features=True, normalize_samples=False):
         self._preprocessor_func = preprocessor_func
         self._extractor_funcs = []
+        self.normalize_samples = normalize_samples
+        self.normalize_features = normalize_features
 
     def add_extractor(self, extractor_func: Callable[[ProcessedSample], ndarray]):
         self._extractor_funcs.append(extractor_func)
@@ -83,34 +86,46 @@ class FeatureVectorBuilder:
     def get_features(self, samples: Sample, verbose=False):
         if verbose:
             print('\nExtracting features...')
-            t1 = time.time()
+            t0 = time.time()
 
         # Determine feature vector size
         extractor_return_len = []
         for extractor_func in self._extractor_funcs:
-            extractor_return_len.append(len(extractor_func(self._preprocessor_func(samples[0]))))
+            example_ret = extractor_func(self._preprocessor_func(samples[0]))
+            assert len(example_ret.shape) == 1, 'All functions added by `add_extractor()` must return 1d numpy ' \
+                                                'arrays. Did you forget to call `array.ravel()`?'
+            extractor_return_len.append(len(example_ret))
         feature_vec_len = np.sum(extractor_return_len)
 
         # Find the feature vector for every sample
-        feature_vectors = np.zeros(shape=(len(samples), feature_vec_len))
-        for i, sample in tqdm(enumerate(samples), total=len(samples)):
+        X = np.zeros(shape=(len(samples), feature_vec_len))  # all feature vectors
+        for i, sample in tqdm(enumerate(samples), total=len(samples), disable=not verbose):
             processed_sample = self._preprocessor_func(sample)
 
             # Add to the feature vector in chunks from each extractor function
             start = 0
             for j, extractor_func in enumerate(self._extractor_funcs):
+                features = extractor_func(processed_sample)
+
+                if self.normalize_samples:
+                    # Normalize over sample. We do this separately for features returned from different functions.
+                    features = features.astype('float64', copy=False)  # change type if needed
+                    scale(features.reshape(-1, 1), axis=0, copy=False)
+
+                # Fill in this function's segment of the feature vector.
                 stop = start + extractor_return_len[j]
-                feature_vectors[i, start:stop] = extractor_func(processed_sample)  # ensure features are flattened
+                X[i, start:stop] = features
                 start = stop
 
-        # Normalize over features (column wise).
-        X_normalized = StandardScaler().fit(feature_vectors).transform(feature_vectors)
+        if self.normalize_features:
+            # Normalize over features (column wise).
+            scale(X, copy=False)
 
         if verbose:
-            print('Done (after {:.1f} seconds).'.format(time.time() - t1))
-            print('Feature vector length:', len(X_normalized[0]))
+            print('Done (after {:.1f} seconds).'.format(time.time() - t0))
+            print('Feature vector length:', len(X[0]))
 
-        return X_normalized
+        return X
 
 
 if __name__ == '__main__':
@@ -134,15 +149,15 @@ if __name__ == '__main__':
     feature_builder.add_extractor(color_hist)
 
     # Extract features
-    all_files = files_car + files_notcars
-    X = feature_builder.get_features(all_files, verbose=True)
+    X_files = files_car + files_notcars
+    X = feature_builder.get_features(X_files, verbose=True)
     y = np.hstack((np.ones(len(files_car)), np.zeros(len(files_notcars))))
 
     # Split into train/test sets
     X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.33)
 
     # Grid search parameters
-    param_dist = {'C': expon(scale=30),
+    param_dist = {'C': expon(scale=20),
                   'gamma': expon(scale=.0005),
                   'kernel': ['rbf']}
 
