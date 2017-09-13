@@ -35,3 +35,13 @@ Some example images for testing your pipeline on single frames are located in th
 ## How to write a README
 A well written README file can enhance your project and portfolio.  Develop your abilities to create professional README files by completing [this free course](https://www.udacity.com/course/writing-readmes--ud777).
 
+# Setup
+
+Download the [vehicle](https://s3.amazonaws.com/udacity-sdc/Vehicle_Tracking/vehicles.zip) and [non-vehicle](https://s3.amazonaws.com/udacity-sdc/Vehicle_Tracking/non-vehicles.zip) examples. Extract the contained `vehicles` and `non-vehicles` folders into `./data`.
+
+CarND-Term1
+
+```
+activate carnd-term1
+```
+
