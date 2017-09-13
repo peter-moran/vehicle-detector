@@ -5,8 +5,8 @@ Trains a classifier to recognise car vs not-car images.
 Author: Peter Moran
 Created: 9/12/2017
 """
+import argparse
 import glob
-import sys
 import time
 from typing import TypeVar, Callable, Sequence
 
@@ -89,9 +89,9 @@ class FeatureVectorBuilder:
             name = 'Extractor {}'.format(len(self.extractor_funcs))
         self.extractor_func_names.append(name)
 
-    def get_features(self, samples: Sample, verbose=False):
-        if verbose:
-            print('\nExtracting features...')
+    def get_features(self, samples: Sample, verbose=0):
+        if verbose >= 2:
+            print('Extracting features...')
             t0 = time.time()
 
         # Determine feature vector size
@@ -103,7 +103,7 @@ class FeatureVectorBuilder:
             extractor_return_lens.append(len(example_ret))
         feature_vec_len = np.sum(extractor_return_lens)
 
-        if verbose:
+        if verbose >= 2:
             print('Feature vector length:', feature_vec_len)
             longest_name = max([len(name) for name in self.extractor_func_names])
             for i in range(len(self.extractor_funcs)):
@@ -136,7 +136,7 @@ class FeatureVectorBuilder:
             # Normalize over features (column wise).
             scale(X, copy=False)
 
-        if verbose:
+        if verbose >= 2:
             print('Done (after {:.1f} seconds).'.format(time.time() - t0))
 
         return X
@@ -157,47 +157,65 @@ class CarFeatureVectorBuilder(FeatureVectorBuilder):
 
 if __name__ == '__main__':
     # Read arguments
-    argc = len(sys.argv)
-    arg1 = sys.argv[1] if argc > 1 else '1000'
-    train_iters = int(sys.argv[2]) if argc > 2 else 10
-    train_jobs = int(sys.argv[3]) if argc > 3 else 4
-    clf_savefile = sys.argv[4] if argc > 4 else 'trained_classifier.pkl'
-    Xy_savefile = sys.argv[5] if argc > 5 else None
+    parser = argparse.ArgumentParser(description='Train classifier for cars vs not-cars.')
+    group = parser.add_mutually_exclusive_group(required=True)
+    group.add_argument('-sz', '--sample_size', type=int, default=10)
+    group.add_argument('-xylf', '--xy_loadfile', type=str, default=None)
+    parser.add_argument('-ti', '--train_iters', type=int, default=10)
+    parser.add_argument('-tj', '--train_jobs', type=int, default=4)
+    parser.add_argument('-clf', '--clf_savefile', type=str, default='./data/trained_classifier.pkl')
+    parser.add_argument('-xysf', '--xy_savefile', type=str, default='./data/Xy.pkl')
+    parser.add_argument('-sr', '--save_remainder', type=bool, default=False)
+    args = parser.parse_args()
+    if args.save_remainder and args.xy_loadfile is not None:
+        parser.error("--save_remainder excludes using --xy_loadfile.")
 
-    if arg1.isdigit():
-        # Build X and y
-        sample_size = int(arg1)
+    if args.xy_loadfile is not None:
+        ## Read X and y from file
+        print("Loading `X` any `y` from '{}'.".format(args.xy_loadfile))
+        X, y = joblib.load(args.xy_loadfile)
 
-        # Divide up into files_car and files_notcars
-        files_car = glob.glob('./data/vehicles/*/*.png')
-        files_notcars = glob.glob('./data/non-vehicles/*/*.png')
+    else:
+        ## Build X and y
+        # Divide up into car_files and notcar_files and shuffle
+        car_files = shuffle(glob.glob('./data/vehicles/*/*.png'))
+        notcar_files = shuffle(glob.glob('./data/non-vehicles/*/*.png'))
 
-        print('Total number of car files:', len(files_car))
-        print('Total number of notcar files:', len(files_notcars))
+        print('Total number of car files:', len(car_files))
+        print('Total number of notcar files:', len(notcar_files))
 
         # Reduce the sample size to speed things up
-        print('Using {} samples each, {} samples total.'.format(sample_size, sample_size * 2))
-        files_car = shuffle(files_car)[:sample_size]
-        files_notcars = shuffle(files_notcars)[:sample_size]
+        n_smaller_class = min(len(car_files), len(notcar_files))
+        assert args.sample_size <= n_smaller_class, 'Training on unbalanced sets not supported.'
+        print('Using {} samples each, {} samples total.\n'.format(args.sample_size, args.sample_size * 2))
 
         # Define feature extractor
         feature_builder = CarFeatureVectorBuilder()
 
         # Extract features
-        X_files = files_car + files_notcars
-        X = feature_builder.get_features(X_files, verbose=True)
-        y = np.hstack((np.ones(len(files_car)), np.zeros(len(files_notcars))))
-        Xy_savefile = 'Xy.pkl' if Xy_savefile is None else Xy_savefile
-        print("Saving features to '{}'.".format(Xy_savefile))
-        joblib.dump((X, y), Xy_savefile)
+        X_files = car_files[:args.sample_size] + notcar_files[:args.sample_size]
+        X = feature_builder.get_features(X_files, verbose=2)
+        y = np.hstack((np.ones(args.sample_size), np.zeros(args.sample_size)))
+        print("Saving features to '{}'.".format(args.xy_savefile))
+        joblib.dump((X, y), args.xy_savefile)
 
-    else:
-        # Read X and y from file
-        print("Loading `X` any `y` from '{}'.".format(arg1))
-        X, y = joblib.load(arg1)
+        if args.save_remainder:
+            n_remainder = n_smaller_class - args.sample_size
+            path, ext = args.xy_savefile.split('.')
+            Xy_unused_save_file = '{}_test.{}'.format(path, ext)
+            print('\nExtracting an additional {} samples from each set ({} in total) that were unused. This can act as'
+                  'an additional test set.'.format(n_remainder, n_remainder * 2))
 
-    # Split into train/test sets
-    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.33)
+            # Build unused features and save
+            X_unused_files = \
+                car_files[args.sample_size: n_smaller_class] + notcar_files[args.sample_size: n_smaller_class]
+            X_unused = feature_builder.get_features(X_unused_files, verbose=1)
+            y_unused = np.hstack((np.ones(n_remainder), np.zeros(n_remainder)))
+            print("Done. Saving to '{}'.".format(Xy_unused_save_file))
+            joblib.dump((X_unused, y_unused), Xy_unused_save_file)
+
+    # Split into train/validation sets
+    X_train, X_valid, y_train, y_valid = train_test_split(X, y, test_size=0.33)
 
     # Grid search parameters
     param_dist = {'C': expon(scale=20),
@@ -205,9 +223,9 @@ if __name__ == '__main__':
                   'kernel': ['rbf']}
 
     # Perform grid search
-    print('\nPerforming grid search with SCV...')
+    print('\nPerforming grid search with SCV on {} threads...'.format(args.train_jobs))
     svc = SVC(cache_size=1000)
-    random_search = RandomizedSearchCV(svc, param_dist, n_jobs=train_jobs, n_iter=train_iters, verbose=1)
+    random_search = RandomizedSearchCV(svc, param_dist, n_jobs=args.train_jobs, n_iter=args.train_iters, verbose=2)
     t0 = time.time()
     random_search.fit(X_train, y_train)
     print('Done after {:.2f} seconds.'.format(time.time() - t0, 2))
@@ -222,5 +240,5 @@ if __name__ == '__main__':
     print('Best SVC parameters set: {}'.format(random_search.best_params_))
 
     # Save the feature extractor and best model
-    print('\nSaving best classifier to "{}".'.format(clf_savefile))
-    joblib.dump(random_search.best_estimator_, clf_savefile)
+    print('\nSaving best classifier to "{}".'.format(args.clf_savefile))
+    joblib.dump(random_search.best_estimator_, args.clf_savefile)
