@@ -6,6 +6,7 @@ Author: Peter Moran
 Created: 9/12/2017
 """
 import glob
+import sys
 import time
 from typing import TypeVar, Callable, Sequence
 
@@ -102,12 +103,13 @@ class FeatureVectorBuilder:
         feature_vec_len = np.sum(extractor_return_lens)
 
         if verbose:
+            print('Feature vector length:', feature_vec_len)
             longest_name = max([len(name) for name in self._extractor_func_names])
             for i in range(len(self._extractor_funcs)):
                 ret_len = extractor_return_lens[i]
                 print("{:<{fill}} contributes {:>5} features ({:>5.1f}%) to each feature vector.".format(
                     self._extractor_func_names[i], ret_len, (ret_len / feature_vec_len) * 100, fill=longest_name))
-                time.sleep(1e-3)  # give print time to finish before progress bar starts
+                time.sleep(1e-2)  # give print time to finish before progress bar starts
 
         # Find the feature vector for every sample
         X = np.zeros(shape=(len(samples), feature_vec_len))  # all feature vectors
@@ -135,12 +137,17 @@ class FeatureVectorBuilder:
 
         if verbose:
             print('Done (after {:.1f} seconds).'.format(time.time() - t0))
-            print('Feature vector length:', len(X[0]))
 
         return X
 
 
 if __name__ == '__main__':
+    # Read arguments
+    argc = len(sys.argv)
+    sample_size = int(sys.argv[1]) if argc > 1 else 1000
+    train_iters = int(sys.argv[2]) if argc > 2 else 4
+    train_jobs = int(sys.argv[3]) if argc > 3 else 10
+
     # Divide up into files_car and files_notcars
     files_car = glob.glob('./data/vehicles/*/*.png')
     files_notcars = glob.glob('./data/non-vehicles/*/*.png')
@@ -149,7 +156,6 @@ if __name__ == '__main__':
     print('Total number of notcar files:', len(files_notcars))
 
     # Reduce the sample size to speed things up
-    sample_size = 1000
     print('Using {} samples each, {} samples total.'.format(sample_size, sample_size * 2))
     files_car = shuffle(files_car)[:sample_size]
     files_notcars = shuffle(files_notcars)[:sample_size]
@@ -176,7 +182,7 @@ if __name__ == '__main__':
     # Perform grid search
     print('\nPerforming grid search with SCV...')
     svc = SVC(cache_size=1000)
-    random_search = RandomizedSearchCV(svc, param_dist, n_jobs=16, verbose=1, n_iter=20)
+    random_search = RandomizedSearchCV(svc, param_dist, n_jobs=train_jobs, n_iter=train_iters, verbose=1)
     t0 = time.time()
     random_search.fit(X_train, y_train)
     print('Done after {:.2f} seconds.'.format(time.time() - t0, 2))
