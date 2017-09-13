@@ -15,6 +15,7 @@ import numpy as np
 from numpy.core.multiarray import ndarray
 from scipy.stats import expon
 from skimage.feature import hog
+from sklearn.externals import joblib
 from sklearn.model_selection import RandomizedSearchCV
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import scale
@@ -76,17 +77,17 @@ class FeatureVectorBuilder:
 
     def __init__(self, preprocessor_func: Callable[[Sample], ProcessedSample],
                  normalize_features=True, normalize_samples=False):
-        self._preprocessor_func = preprocessor_func
-        self._extractor_funcs = []
-        self._extractor_func_names = []
+        self.preprocessor_func = preprocessor_func
+        self.extractor_funcs = []
+        self.extractor_func_names = []
         self.normalize_samples = normalize_samples
         self.normalize_features = normalize_features
 
     def add_extractor(self, extractor_func: Callable[[ProcessedSample], ndarray], name=None):
-        self._extractor_funcs.append(extractor_func)
+        self.extractor_funcs.append(extractor_func)
         if name is None:
-            name = 'Extractor {}'.format(len(self._extractor_funcs))
-        self._extractor_func_names.append(name)
+            name = 'Extractor {}'.format(len(self.extractor_funcs))
+        self.extractor_func_names.append(name)
 
     def get_features(self, samples: Sample, verbose=False):
         if verbose:
@@ -95,8 +96,8 @@ class FeatureVectorBuilder:
 
         # Determine feature vector size
         extractor_return_lens = []
-        for extractor_func in self._extractor_funcs:
-            example_ret = extractor_func(self._preprocessor_func(samples[0]))
+        for extractor_func in self.extractor_funcs:
+            example_ret = extractor_func(self.preprocessor_func(samples[0]))
             assert len(example_ret.shape) == 1, 'All functions added by `add_extractor()` must return 1d numpy ' \
                                                 'arrays. Did you forget to call `array.ravel()`?'
             extractor_return_lens.append(len(example_ret))
@@ -104,21 +105,21 @@ class FeatureVectorBuilder:
 
         if verbose:
             print('Feature vector length:', feature_vec_len)
-            longest_name = max([len(name) for name in self._extractor_func_names])
-            for i in range(len(self._extractor_funcs)):
+            longest_name = max([len(name) for name in self.extractor_func_names])
+            for i in range(len(self.extractor_funcs)):
                 ret_len = extractor_return_lens[i]
                 print("{:<{fill}} contributes {:>5} features ({:>5.1f}%) to each feature vector.".format(
-                    self._extractor_func_names[i], ret_len, (ret_len / feature_vec_len) * 100, fill=longest_name))
+                    self.extractor_func_names[i], ret_len, (ret_len / feature_vec_len) * 100, fill=longest_name))
                 time.sleep(1e-2)  # give print time to finish before progress bar starts
 
         # Find the feature vector for every sample
         X = np.zeros(shape=(len(samples), feature_vec_len))  # all feature vectors
         for i, sample in tqdm(enumerate(samples), total=len(samples), disable=not verbose):
-            processed_sample = self._preprocessor_func(sample)
+            processed_sample = self.preprocessor_func(sample)
 
             # Add to the feature vector in chunks from each extractor function
             start = 0
-            for j, extractor_func in enumerate(self._extractor_funcs):
+            for j, extractor_func in enumerate(self.extractor_funcs):
                 features = extractor_func(processed_sample)
 
                 if self.normalize_samples:
@@ -141,35 +142,59 @@ class FeatureVectorBuilder:
         return X
 
 
+class CarFeatureVectorBuilder(FeatureVectorBuilder):
+    def __init__(self):
+        """
+        FeatureVectorBuilder initialized for identifying cars vs notcars.
+
+        Used to ensure consistent feature extraction for all usage cases (eg training and classification).
+        """
+        super().__init__(lambda file: cv2.imread(file))
+        self.add_extractor(lambda img: hog_features(img, cspace='HSV', cell_per_block=3), 'HOG extraction')
+        self.add_extractor(bin_color_spatial, 'Spatial binning')
+        self.add_extractor(color_hist, 'Color histogram')
+
+
 if __name__ == '__main__':
     # Read arguments
     argc = len(sys.argv)
-    sample_size = int(sys.argv[1]) if argc > 1 else 1000
-    train_iters = int(sys.argv[2]) if argc > 2 else 4
-    train_jobs = int(sys.argv[3]) if argc > 3 else 10
+    arg1 = sys.argv[1] if argc > 1 else '1000'
+    train_iters = int(sys.argv[2]) if argc > 2 else 10
+    train_jobs = int(sys.argv[3]) if argc > 3 else 4
+    clf_savefile = sys.argv[4] if argc > 4 else 'trained_classifier.pkl'
+    Xy_savefile = sys.argv[5] if argc > 5 else None
 
-    # Divide up into files_car and files_notcars
-    files_car = glob.glob('./data/vehicles/*/*.png')
-    files_notcars = glob.glob('./data/non-vehicles/*/*.png')
+    if arg1.isdigit():
+        # Build X and y
+        sample_size = int(arg1)
 
-    print('Total number of car files:', len(files_car))
-    print('Total number of notcar files:', len(files_notcars))
+        # Divide up into files_car and files_notcars
+        files_car = glob.glob('./data/vehicles/*/*.png')
+        files_notcars = glob.glob('./data/non-vehicles/*/*.png')
 
-    # Reduce the sample size to speed things up
-    print('Using {} samples each, {} samples total.'.format(sample_size, sample_size * 2))
-    files_car = shuffle(files_car)[:sample_size]
-    files_notcars = shuffle(files_notcars)[:sample_size]
+        print('Total number of car files:', len(files_car))
+        print('Total number of notcar files:', len(files_notcars))
 
-    # Define feature extractor
-    feature_builder = FeatureVectorBuilder(preprocessor_func=lambda file: cv2.imread(file))
-    feature_builder.add_extractor(lambda img: hog_features(img, cspace='HSV', cell_per_block=3), 'HOG extraction')
-    feature_builder.add_extractor(bin_color_spatial, 'Spatial binning')
-    feature_builder.add_extractor(color_hist, 'Color histogram')
+        # Reduce the sample size to speed things up
+        print('Using {} samples each, {} samples total.'.format(sample_size, sample_size * 2))
+        files_car = shuffle(files_car)[:sample_size]
+        files_notcars = shuffle(files_notcars)[:sample_size]
 
-    # Extract features
-    X_files = files_car + files_notcars
-    X = feature_builder.get_features(X_files, verbose=True)
-    y = np.hstack((np.ones(len(files_car)), np.zeros(len(files_notcars))))
+        # Define feature extractor
+        feature_builder = CarFeatureVectorBuilder()
+
+        # Extract features
+        X_files = files_car + files_notcars
+        X = feature_builder.get_features(X_files, verbose=True)
+        y = np.hstack((np.ones(len(files_car)), np.zeros(len(files_notcars))))
+        Xy_savefile = 'Xy.pkl' if Xy_savefile is None else Xy_savefile
+        print("Saving features to '{}'.".format(Xy_savefile))
+        joblib.dump((X, y), Xy_savefile)
+
+    else:
+        # Read X and y from file
+        print("Loading `X` any `y` from '{}'.".format(arg1))
+        X, y = joblib.load(arg1)
 
     # Split into train/test sets
     X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.33)
@@ -188,10 +213,14 @@ if __name__ == '__main__':
     print('Done after {:.2f} seconds.'.format(time.time() - t0, 2))
 
     # Print stats
-    print('\nBest SVC score: {:0.3f}'.format(random_search.best_score_))
-    print('Best SVC parameters set: {}'.format(random_search.best_params_))
     print('\nGrid scores on development set:')
     means = random_search.cv_results_['mean_test_score']
     stds = random_search.cv_results_['std_test_score']
     for mean, std, params in zip(means, stds, random_search.cv_results_['params']):
         print('\t{:0.3f} (+/-{:0.03f}) for {!r}'.format(mean, std * 2, params))
+    print('\nBest SVC score: {:0.3f}'.format(random_search.best_score_))
+    print('Best SVC parameters set: {}'.format(random_search.best_params_))
+
+    # Save the feature extractor and best model
+    print('\nSaving best classifier to "{}".'.format(clf_savefile))
+    joblib.dump(random_search.best_estimator_, clf_savefile)
