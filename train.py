@@ -11,14 +11,15 @@ from typing import TypeVar, Callable, Sequence
 
 import cv2
 import numpy as np
-from tqdm import tqdm
 from numpy.core.multiarray import ndarray
+from scipy.stats import expon
 from skimage.feature import hog
-from sklearn.model_selection import GridSearchCV
+from sklearn.model_selection import RandomizedSearchCV
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler
-from sklearn.svm import LinearSVC, SVC
+from sklearn.svm import SVC
 from sklearn.utils import shuffle
+from tqdm import tqdm
 
 
 def hog_features(image, n_orient=9, pix_per_cell=8, cell_per_block=2, cspace='BGR', hog_channels='ALL'):
@@ -121,7 +122,7 @@ if __name__ == '__main__':
     print('Total number of notcar files:', len(files_notcars))
 
     # Reduce the sample size to speed things up
-    sample_size = 500
+    sample_size = 1000
     print('Using {} samples each, {} samples total.'.format(sample_size, sample_size * 2))
     files_car = shuffle(files_car)[:sample_size]
     files_notcars = shuffle(files_notcars)[:sample_size]
@@ -141,25 +142,23 @@ if __name__ == '__main__':
     X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.33)
 
     # Grid search parameters
-    param_grid = [
-        {'C': [5, 10, 15, 20],
-         'gamma': [0.001, 0.0001],
-         'kernel': ['rbf']},
-    ]
+    param_dist = {'C': expon(scale=30),
+                  'gamma': expon(scale=.0005),
+                  'kernel': ['rbf']}
 
     # Perform grid search
     print('\nPerforming grid search with SCV...')
     svc = SVC(cache_size=1000)
-    clf = GridSearchCV(svc, param_grid, n_jobs=32, verbose=1)
+    random_search = RandomizedSearchCV(svc, param_dist, n_jobs=20, verbose=1, n_iter=20)
     t0 = time.time()
-    clf.fit(X_train, y_train)
+    random_search.fit(X_train, y_train)
     print('Done after {:.2f} seconds.'.format(time.time() - t0, 2))
 
     # Print stats
-    print('\nBest SVC score: {:0.3f}'.format(clf.best_score_))
-    print('Best SVC parameters set: {}'.format(clf.best_params_))
-    print('\nGrid scores on development set:\n')
-    means = clf.cv_results_['mean_test_score']
-    stds = clf.cv_results_['std_test_score']
-    for mean, std, params in zip(means, stds, clf.cv_results_['params']):
-        print('{:0.3f} (+/-{:0.03f}) for {!r}'.format(mean, std * 2, params))
+    print('\nBest SVC score: {:0.3f}'.format(random_search.best_score_))
+    print('Best SVC parameters set: {}'.format(random_search.best_params_))
+    print('\nGrid scores on development set:')
+    means = random_search.cv_results_['mean_test_score']
+    stds = random_search.cv_results_['std_test_score']
+    for mean, std, params in zip(means, stds, random_search.cv_results_['params']):
+        print('\t{:0.3f} (+/-{:0.03f}) for {!r}'.format(mean, std * 2, params))
