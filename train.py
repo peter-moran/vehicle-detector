@@ -10,13 +10,14 @@ import time
 from typing import TypeVar, Callable, Sequence
 
 import cv2
-import matplotlib.image as mpimg
 import numpy as np
+from tqdm import tqdm
 from numpy.core.multiarray import ndarray
 from skimage.feature import hog
+from sklearn.model_selection import GridSearchCV
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler
-from sklearn.svm import LinearSVC
+from sklearn.svm import LinearSVC, SVC
 from sklearn.utils import shuffle
 
 
@@ -91,7 +92,7 @@ class FeatureVectorBuilder:
 
         # Find the feature vector for every sample
         feature_vectors = np.zeros(shape=(len(samples), feature_vec_len))
-        for i, sample in enumerate(samples):
+        for i, sample in tqdm(enumerate(samples), total=len(samples)):
             processed_sample = self._preprocessor_func(sample)
 
             # Add to the feature vector in chunks from each extractor function
@@ -116,12 +117,12 @@ if __name__ == '__main__':
     files_car = glob.glob('./data/vehicles/*/*.png')
     files_notcars = glob.glob('./data/non-vehicles/*/*.png')
 
-    print('Total number of car all_files:', len(files_car))
-    print('Total number of notcar all_files:', len(files_notcars))
+    print('Total number of car files:', len(files_car))
+    print('Total number of notcar files:', len(files_notcars))
 
     # Reduce the sample size to speed things up
-    sample_size = 8500
-    print('Using {} samples each, {} total samples.'.format(sample_size, sample_size * 2))
+    sample_size = 500
+    print('Using {} samples each, {} samples total.'.format(sample_size, sample_size * 2))
     files_car = shuffle(files_car)[:sample_size]
     files_notcars = shuffle(files_notcars)[:sample_size]
 
@@ -137,14 +138,28 @@ if __name__ == '__main__':
     y = np.hstack((np.ones(len(files_car)), np.zeros(len(files_notcars))))
 
     # Split into train/test sets
-    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.3)
+    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.33)
 
-    # Use a linear SVC
-    svc = LinearSVC()
-    t = time.time()
-    svc.fit(X_train, y_train)
-    t2 = time.time()
-    print('\nIt took', round(t2 - t, 2), 'seconds to train.')
+    # Grid search parameters
+    param_grid = [
+        {'C': [5, 10, 15, 20],
+         'gamma': [0.001, 0.0001],
+         'kernel': ['rbf']},
+    ]
 
-    # Check the score of the SVC
-    print('Test Accuracy of SVC = ', round(svc.score(X_test, y_test), 4))
+    # Perform grid search
+    print('\nPerforming grid search with SCV...')
+    svc = SVC(cache_size=1000)
+    clf = GridSearchCV(svc, param_grid, n_jobs=32, verbose=1)
+    t0 = time.time()
+    clf.fit(X_train, y_train)
+    print('Done after {:.2f} seconds.'.format(time.time() - t0, 2))
+
+    # Print stats
+    print('\nBest SVC score: {:0.3f}'.format(clf.best_score_))
+    print('Best SVC parameters set: {}'.format(clf.best_params_))
+    print('\nGrid scores on development set:\n')
+    means = clf.cv_results_['mean_test_score']
+    stds = clf.cv_results_['std_test_score']
+    for mean, std, params in zip(means, stds, clf.cv_results_['params']):
+        print('{:0.3f} (+/-{:0.03f}) for {!r}'.format(mean, std * 2, params))
