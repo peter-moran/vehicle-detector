@@ -49,7 +49,7 @@ def hog_features(image, n_orient=9, pix_per_cell=8, cell_per_block=2, cspace='BG
     return np.ravel(hog_features)
 
 
-def bin_spatial(img, size=(32, 32)):
+def bin_color_spatial(img, size=(32, 32)):
     features = cv2.resize(img, size).ravel()
     return features
 
@@ -77,11 +77,15 @@ class FeatureVectorBuilder:
                  normalize_features=True, normalize_samples=False):
         self._preprocessor_func = preprocessor_func
         self._extractor_funcs = []
+        self._extractor_func_names = []
         self.normalize_samples = normalize_samples
         self.normalize_features = normalize_features
 
-    def add_extractor(self, extractor_func: Callable[[ProcessedSample], ndarray]):
+    def add_extractor(self, extractor_func: Callable[[ProcessedSample], ndarray], name=None):
         self._extractor_funcs.append(extractor_func)
+        if name is None:
+            name = 'Extractor {}'.format(len(self._extractor_funcs))
+        self._extractor_func_names.append(name)
 
     def get_features(self, samples: Sample, verbose=False):
         if verbose:
@@ -89,13 +93,21 @@ class FeatureVectorBuilder:
             t0 = time.time()
 
         # Determine feature vector size
-        extractor_return_len = []
+        extractor_return_lens = []
         for extractor_func in self._extractor_funcs:
             example_ret = extractor_func(self._preprocessor_func(samples[0]))
             assert len(example_ret.shape) == 1, 'All functions added by `add_extractor()` must return 1d numpy ' \
                                                 'arrays. Did you forget to call `array.ravel()`?'
-            extractor_return_len.append(len(example_ret))
-        feature_vec_len = np.sum(extractor_return_len)
+            extractor_return_lens.append(len(example_ret))
+        feature_vec_len = np.sum(extractor_return_lens)
+
+        if verbose:
+            longest_name = max([len(name) for name in self._extractor_func_names])
+            for i in range(len(self._extractor_funcs)):
+                ret_len = extractor_return_lens[i]
+                print("{:<{fill}} contributes {:>5} features ({:>5.1f}%) to each feature vector.".format(
+                    self._extractor_func_names[i], ret_len, (ret_len / feature_vec_len) * 100, fill=longest_name))
+                time.sleep(1e-3)  # give print time to finish before progress bar starts
 
         # Find the feature vector for every sample
         X = np.zeros(shape=(len(samples), feature_vec_len))  # all feature vectors
@@ -113,7 +125,7 @@ class FeatureVectorBuilder:
                     scale(features.reshape(-1, 1), axis=0, copy=False)
 
                 # Fill in this function's segment of the feature vector.
-                stop = start + extractor_return_len[j]
+                stop = start + extractor_return_lens[j]
                 X[i, start:stop] = features
                 start = stop
 
@@ -144,9 +156,9 @@ if __name__ == '__main__':
 
     # Define feature extractor
     feature_builder = FeatureVectorBuilder(preprocessor_func=lambda file: cv2.imread(file))
-    feature_builder.add_extractor(lambda img: hog_features(img, cspace='HSV', cell_per_block=3))
-    feature_builder.add_extractor(bin_spatial)
-    feature_builder.add_extractor(color_hist)
+    feature_builder.add_extractor(lambda img: hog_features(img, cspace='HSV', cell_per_block=3), 'HOG extraction')
+    feature_builder.add_extractor(bin_color_spatial, 'Spatial binning')
+    feature_builder.add_extractor(color_hist, 'Color histogram')
 
     # Extract features
     X_files = files_car + files_notcars
@@ -164,7 +176,7 @@ if __name__ == '__main__':
     # Perform grid search
     print('\nPerforming grid search with SCV...')
     svc = SVC(cache_size=1000)
-    random_search = RandomizedSearchCV(svc, param_dist, n_jobs=20, verbose=1, n_iter=20)
+    random_search = RandomizedSearchCV(svc, param_dist, n_jobs=16, verbose=1, n_iter=20)
     t0 = time.time()
     random_search.fit(X_train, y_train)
     print('Done after {:.2f} seconds.'.format(time.time() - t0, 2))
