@@ -78,7 +78,7 @@ if __name__ == '__main__':
     svc = joblib.load(clf_savefile)
     print("Loading scaler from '{}'.".format(scaler_savefile))
     scaler = joblib.load(scaler_savefile)
-    fvb = CarFeatureVectorBuilder(mode='image', feature_scaler=scaler)
+    fvb = CarFeatureVectorBuilder(feature_scaler=scaler)
 
     image = mpimg.imread('./data/test_images/test7.jpg')
     windows = get_all_windows(image, window_shape=(120, 120), overlap=(0.5, 0.5), y_range=(400, None))

@@ -72,24 +72,37 @@ def color_hist(img, nbins=32, bins_range=(0, 256), channels='ALL'):
 
 
 class FeatureVectorBuilder:
-    # TODO: Allow different pre-processors based on input type.
     Sample = TypeVar('Sample')
     ProcessedSample = TypeVar('ProcessedSample')
 
-    def __init__(self, preprocessor_func: Callable[[Sample], ProcessedSample],
-                 normalize_features=True, normalize_samples=False, feature_scaler=None):
-        self.preprocessor_func = preprocessor_func
+    def __init__(self, normalize_features=True, normalize_samples=False, feature_scaler=None):
+        self.preprocessor_funcs = []
+        self.preprocessor_types = []
         self.extractor_funcs = []
         self.extractor_func_names = []
         self.normalize_samples = normalize_samples
         self.normalize_features = normalize_features
         self.feature_scaler = feature_scaler
 
+    def add_preprocessor(self, preprocessor_func: Callable[[Sample], ProcessedSample], type):
+        self.preprocessor_funcs.append(preprocessor_func)
+        self.preprocessor_types.append(type)
+
     def add_extractor(self, extractor_func: Callable[[ProcessedSample], ndarray], name=None):
         self.extractor_funcs.append(extractor_func)
         if name is None:
             name = 'Extractor {}'.format(len(self.extractor_funcs))
         self.extractor_func_names.append(name)
+
+    def preprocess(self, o):
+        try:
+            ndx = self.preprocessor_types.index(type(o))
+        except ValueError as err:
+            if not err.args:
+                err.args = ('',)
+            err.args = err.args + ('There is no preprocessor for type {}'.format(type(o)),)
+            raise
+        return self.preprocessor_funcs[ndx](o)
 
     def get_features(self, samples: Sample, verbose=0):
         if verbose >= 2:
@@ -99,7 +112,7 @@ class FeatureVectorBuilder:
         # Determine feature vector size
         extractor_return_lens = []
         for extractor_func in self.extractor_funcs:
-            example_ret = extractor_func(self.preprocessor_func(samples[0]))
+            example_ret = extractor_func(self.preprocess(samples[0]))
             assert len(example_ret.shape) == 1, 'All functions added by `add_extractor()` must return 1d numpy ' \
                                                 'arrays. Did you forget to call `array.ravel()`?'
             extractor_return_lens.append(len(example_ret))
@@ -117,7 +130,7 @@ class FeatureVectorBuilder:
         # Find the feature vector for every sample
         X = np.zeros(shape=(len(samples), feature_vec_len))  # all feature vectors
         for i, sample in tqdm(enumerate(samples), total=len(samples), disable=not verbose):
-            processed_sample = self.preprocessor_func(sample)
+            processed_sample = self.preprocess(sample)
 
             # Add to the feature vector in chunks from each fvb function
             start = 0
@@ -147,25 +160,26 @@ class FeatureVectorBuilder:
 
 
 class CarFeatureVectorBuilder(FeatureVectorBuilder):
-    def __init__(self, image_shape=(64, 64, 3), mode='file', feature_scaler=None):
+    def __init__(self, image_shape=(64, 64, 3), normalize_features=True, normalize_samples=False, feature_scaler=None):
         """
         FeatureVectorBuilder initialized for identifying cars vs notcars.
 
         Used to ensure consistent feature extraction for all usage cases (eg training and classification).
         """
-        assert mode in ['file', 'image'], "`_mode` must be 'file' or 'image'"
-        self._mode = mode
         self.image_shape = image_shape
-        super().__init__(self.preprocess, feature_scaler=feature_scaler)
+        super().__init__(normalize_features, normalize_samples, feature_scaler)
+
+        # Set up preprocessors
+        self.add_preprocessor(cv2.imread, str)
+        self.add_preprocessor(lambda img: img, ndarray)
+
+        # Set up extractors
         self.add_extractor(lambda img: hog_features(img, cspace='HSV', cell_per_block=3), 'HOG extraction')
         self.add_extractor(bin_color_spatial, 'Spatial binning')
         self.add_extractor(color_hist, 'Color histogram')
 
     def preprocess(self, o):
-        if self._mode == 'file':
-            img = cv2.imread(o)
-        elif self._mode == 'image':
-            img = o
+        img = super().preprocess(o)
         assert img.shape == self.image_shape, 'CarFeatureVectorBuilder is initialized for images of shape' \
                                               ' {} not {}'.format(self.image_shape, img.shape)
         return img
