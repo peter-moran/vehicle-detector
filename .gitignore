@@ -214,3 +214,5 @@ crashlytics.properties
 crashlytics-build.properties
 fabric.properties
 
+/data/non-vehicles/
+/data/vehicles/
