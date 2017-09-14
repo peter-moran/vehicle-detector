@@ -143,16 +143,23 @@ class FeatureVectorBuilder:
 
 
 class CarFeatureVectorBuilder(FeatureVectorBuilder):
-    def __init__(self):
+    def __init__(self, image_shape=(64, 64, 3)):
         """
         FeatureVectorBuilder initialized for identifying cars vs notcars.
 
         Used to ensure consistent feature extraction for all usage cases (eg training and classification).
         """
-        super().__init__(lambda file: cv2.imread(file))
+        self.image_shape = image_shape
+        super().__init__(self.preprocess)
         self.add_extractor(lambda img: hog_features(img, cspace='HSV', cell_per_block=3), 'HOG extraction')
         self.add_extractor(bin_color_spatial, 'Spatial binning')
         self.add_extractor(color_hist, 'Color histogram')
+
+    def preprocess(self, file):
+        img = cv2.imread(file)
+        assert img.shape == self.image_shape, 'CarFeatureVectorBuilder is initialized for images of shape' \
+                                              ' {} not {}'.format(self.image_shape, img.shape)
+        return img
 
 
 if __name__ == '__main__':
