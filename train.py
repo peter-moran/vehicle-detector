@@ -18,7 +18,7 @@ from skimage.feature import hog
 from sklearn.externals import joblib
 from sklearn.model_selection import RandomizedSearchCV
 from sklearn.model_selection import train_test_split
-from sklearn.preprocessing import scale
+from sklearn.preprocessing import scale, StandardScaler
 from sklearn.svm import SVC
 from sklearn.utils import shuffle
 from tqdm import tqdm
@@ -72,16 +72,18 @@ def color_hist(img, nbins=32, bins_range=(0, 256), channels='ALL'):
 
 
 class FeatureVectorBuilder:
+    # TODO: Allow different pre-processors based on input type.
     Sample = TypeVar('Sample')
     ProcessedSample = TypeVar('ProcessedSample')
 
     def __init__(self, preprocessor_func: Callable[[Sample], ProcessedSample],
-                 normalize_features=True, normalize_samples=False):
+                 normalize_features=True, normalize_samples=False, feature_scaler=None):
         self.preprocessor_func = preprocessor_func
         self.extractor_funcs = []
         self.extractor_func_names = []
         self.normalize_samples = normalize_samples
         self.normalize_features = normalize_features
+        self.feature_scaler = feature_scaler
 
     def add_extractor(self, extractor_func: Callable[[ProcessedSample], ndarray], name=None):
         self.extractor_funcs.append(extractor_func)
@@ -117,7 +119,7 @@ class FeatureVectorBuilder:
         for i, sample in tqdm(enumerate(samples), total=len(samples), disable=not verbose):
             processed_sample = self.preprocessor_func(sample)
 
-            # Add to the feature vector in chunks from each extractor function
+            # Add to the feature vector in chunks from each fvb function
             start = 0
             for j, extractor_func in enumerate(self.extractor_funcs):
                 features = extractor_func(processed_sample)
@@ -134,7 +136,9 @@ class FeatureVectorBuilder:
 
         if self.normalize_features:
             # Normalize over features (column wise).
-            scale(X, copy=False)
+            if self.feature_scaler is None:
+                self.feature_scaler = StandardScaler().fit(X)
+            X = self.feature_scaler.transform(X)
 
         if verbose >= 2:
             print('Done (after {:.1f} seconds).'.format(time.time() - t0))
@@ -143,20 +147,25 @@ class FeatureVectorBuilder:
 
 
 class CarFeatureVectorBuilder(FeatureVectorBuilder):
-    def __init__(self, image_shape=(64, 64, 3)):
+    def __init__(self, image_shape=(64, 64, 3), mode='file', feature_scaler=None):
         """
         FeatureVectorBuilder initialized for identifying cars vs notcars.
 
         Used to ensure consistent feature extraction for all usage cases (eg training and classification).
         """
+        assert mode in ['file', 'image'], "`_mode` must be 'file' or 'image'"
+        self._mode = mode
         self.image_shape = image_shape
-        super().__init__(self.preprocess)
+        super().__init__(self.preprocess, feature_scaler=feature_scaler)
         self.add_extractor(lambda img: hog_features(img, cspace='HSV', cell_per_block=3), 'HOG extraction')
         self.add_extractor(bin_color_spatial, 'Spatial binning')
         self.add_extractor(color_hist, 'Color histogram')
 
-    def preprocess(self, file):
-        img = cv2.imread(file)
+    def preprocess(self, o):
+        if self._mode == 'file':
+            img = cv2.imread(o)
+        elif self._mode == 'image':
+            img = o
         assert img.shape == self.image_shape, 'CarFeatureVectorBuilder is initialized for images of shape' \
                                               ' {} not {}'.format(self.image_shape, img.shape)
         return img
@@ -196,20 +205,25 @@ if __name__ == '__main__':
         assert args.sample_size <= n_smaller_class, 'Training on unbalanced sets not supported.'
         print('Using {} samples each, {} samples total.\n'.format(args.sample_size, args.sample_size * 2))
 
-        # Define feature extractor
+        # Define feature fvb
         feature_builder = CarFeatureVectorBuilder()
 
         # Extract features
         X_files = car_files[:args.sample_size] + notcar_files[:args.sample_size]
         X = feature_builder.get_features(X_files, verbose=2)
         y = np.hstack((np.ones(args.sample_size), np.zeros(args.sample_size)))
+
+        # Save features
+        xy_savepath, ext = args.xy_savefile.rsplit('.', 1)
         print("Saving features to '{}'.".format(args.xy_savefile))
         joblib.dump((X, y), args.xy_savefile)
+        scaler_save_file = '{}_scaler.{}'.format(xy_savepath, ext)
+        print("Saving `StandardScaler` for this feature set to '{}'.".format(scaler_save_file))
+        joblib.dump(feature_builder.feature_scaler, scaler_save_file)
 
         if args.save_remainder:
             n_remainder = n_smaller_class - args.sample_size
-            path, ext = args.xy_savefile.split('.')
-            Xy_unused_save_file = '{}_test.{}'.format(path, ext)
+            Xy_unused_save_file = '{}_test.{}'.format(xy_savepath, ext)
             print('\nExtracting an additional {} samples from each set ({} in total) that were unused. This can act as'
                   'an additional test set.'.format(n_remainder, n_remainder * 2))
 
@@ -246,6 +260,6 @@ if __name__ == '__main__':
     print('\nBest SVC score: {:0.3f}'.format(random_search.best_score_))
     print('Best SVC parameters set: {}'.format(random_search.best_params_))
 
-    # Save the feature extractor and best model
+    # Save the feature fvb and best model
     print('\nSaving best classifier to "{}".'.format(args.clf_savefile))
     joblib.dump(random_search.best_estimator_, args.clf_savefile)
