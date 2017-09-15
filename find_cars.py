@@ -11,12 +11,11 @@ from glob import glob
 from typing import Tuple, Iterable
 
 import cv2
-import matplotlib.image as mpimg
 import matplotlib.pyplot as plt
 import numpy as np
 from sklearn.externals import joblib
 
-from train import CarFeatureVectorBuilder, get_hog_features, CARS
+from train import CarFeatureVectorBuilder, get_hog_features
 
 Rectangle = Tuple[Tuple[int, int], Tuple[int, int]]
 '''A pair of (x, y) vertices defining a rectangle.'''
@@ -28,6 +27,15 @@ def draw_rectangles(img, rectangles: Iterable[Rectangle], color=(0, 0, 255), thi
     for bbox in rectangles:
         cv2.rectangle(imcopy, bbox[0], bbox[1], color, thick)
     return imcopy
+
+
+def gen_heatmap(rectangles: Iterable[Rectangle], rectangle_scores, img_shape, color=(255, 0, 0)):
+    heatmap = np.zeros(img_shape[:2])
+    for rec, score in zip(rectangles, rectangle_scores):
+        heatmap[rec[0][1]:rec[1][1], rec[0][0]:rec[1][0]] += score
+    heatmap = cv2.normalize(heatmap, None, 0.0, 1.0, cv2.NORM_MINMAX)
+    color_heat = cv2.merge([heatmap * c for c in color])
+    return color_heat.astype('uint8')
 
 
 def find_cars(img, clf, fvb: CarFeatureVectorBuilder, y_range, window_scale, window_overlap):
@@ -53,6 +61,7 @@ def find_cars(img, clf, fvb: CarFeatureVectorBuilder, y_range, window_scale, win
 
     # Step through all the windows by block increments
     desired_windows = []
+    desired_windows_mag = []
     cells_per_window_step = int((1 - window_overlap) * cells_per_window_edge)
     for x_block_step in range((nblocks_x - blocks_per_window_edge) // cells_per_window_step):
         for y_block_step in range((nblocks_y - blocks_per_window_edge) // cells_per_window_step):
@@ -69,16 +78,17 @@ def find_cars(img, clf, fvb: CarFeatureVectorBuilder, y_range, window_scale, win
 
             # Get feature vector and classify
             feature_vector = fvb.get_features_single((window_img, hog_features))
-            classification = clf.predict(feature_vector)
+            classification_score = clf.decision_function(feature_vector)
 
-            if classification == CARS:
+            if classification_score >= 0:
                 # Transform back image patch coords back to original image space and save as rectangle
                 x_rec_left = int(x_px_begin * window_scale)
                 y_rec_top = int(y_px_begin * window_scale) + y_range[0]
                 draw_size = int(window_size * window_scale)
                 desired_windows.append(((x_rec_left, y_rec_top),
                                         (x_rec_left + draw_size, y_rec_top + draw_size)))
-    return desired_windows
+                desired_windows_mag.append(classification_score)
+    return desired_windows, desired_windows_mag
 
 if __name__ == '__main__':
     # Load parameters
@@ -96,10 +106,22 @@ if __name__ == '__main__':
     # Test images
     print('Searching for cars in image...')
     for imgf in sorted(glob('./data/test_images/*.jpg')):
-        image = mpimg.imread(imgf)
-        car_windows = find_cars(image, svc, fvb, y_range=(400, 656), window_scale=1.5, window_overlap=0.75)
+        image = cv2.imread(imgf)
 
-        window_img = draw_rectangles(image, car_windows, color=(0, 0, 255), thick=6)
+        # Perform search over multiple scales
+        searches = [(400, 580, 0.8, 6 / 8), (400, 660, 1.2, 6 / 8), (400, 660, 1.8, 6 / 8), (500, 700, 2.5, 6 / 8)]
+        windows, window_scores = [], []
+        for ystart, ystop, scale, overlap in searches:
+            w, ws = find_cars(image, svc, fvb, (ystart, ystop), scale, overlap)
+            windows += w
+            window_scores += ws
+
+        # Display
+        # TODO: Convert BGR to RGB?
+        heat = gen_heatmap(windows, window_scores, image.shape)
+        heat_img = cv2.addWeighted(image, 0.3, heat, 0.7, 0)
+        window_img = draw_rectangles(heat_img, windows, color=(0, 0, 180), thick=2)
         plt.figure()
         plt.imshow(window_img)
+        plt.title(imgf)
     plt.show()
