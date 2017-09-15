@@ -6,8 +6,8 @@ Author: Peter Moran
 Created: 9/12/2017
 """
 import argparse
-import glob
 import time
+from glob import glob
 from typing import TypeVar, Callable, Sequence, Iterable
 
 import cv2
@@ -202,29 +202,42 @@ class CarFeatureVectorBuilder(FeatureVectorBuilder):
 
 if __name__ == '__main__':
     # Read arguments
-    parser = argparse.ArgumentParser(description='Train classifier for cars vs not-cars.')
-    group = parser.add_mutually_exclusive_group(required=True)
-    group.add_argument('-sz', '--sample_size', type=int, default=10)
-    group.add_argument('-xylf', '--xy_loadfile', type=str, default=None)
+    parser = argparse.ArgumentParser(description='Train classifier for cars vs not-cars.',
+                                     usage='%(prog)s [(-cf & -ncf)? -sz | -xylf ] [additional options]')
+    parser.add_argument('-sz', '--sample_size', type=int)
+    parser.add_argument('-xylf', '--xy_loadfile', type=str)
+    parser.add_argument('-cf', '--car_pickle_file', type=str)
+    parser.add_argument('-ncf', '--notcar_pickle_file', type=str)
     parser.add_argument('-ti', '--train_iters', type=int, default=10)
     parser.add_argument('-tj', '--train_jobs', type=int, default=4)
     parser.add_argument('-clf', '--clf_savefile', type=str, default='./data/trained_classifier.pkl')
     parser.add_argument('-xysf', '--xy_savefile', type=str, default='./data/Xy.pkl')
     parser.add_argument('-sr', '--save_remainder', type=bool, default=False)
     args = parser.parse_args()
-    if args.save_remainder and args.xy_loadfile is not None:
-        parser.error("--save_remainder excludes using --xy_loadfile.")
+    if args.save_remainder and args.sz is None:
+        parser.error("--save_remainder requires using --sample_size.")
+    if (args.car_pickle_file is not None) ^ (args.notcar_pickle_file is not None):
+        parser.error("-cf and -ncf must be passed together.")
+    if (args.car_pickle_file is not None) and (args.notcar_pickle_file is not None) and args.sample_size is None:
+        parser.error("-cf and -ncf require -sz to be passed.")
 
-    if args.xy_loadfile is not None:
-        ## Read X and y from file
+    # Get image features
+    if args.xy_loadfile is not None:  # Read X and y from file
         print("Loading `X` any `y` from '{}'.".format(args.xy_loadfile))
         X, y = joblib.load(args.xy_loadfile)
+    else:  # Extract X and y from images
+        if args.car_pickle_file is not None and args.notcar_pickle_file is not None:
+            # Read car_files and notcar_files from pickled list
+            car_files = joblib.load(args.car_pickle_file)
+            notcar_files = joblib.load(args.notcar_pickle_file)
+        else:
+            # Automatically load all car_files and notcar_files
+            car_files = glob('./data/vehicles/*/*.png')
+            notcar_files = glob('./data/non-vehicles/*/*.png')
 
-    else:
-        ## Build X and y
-        # Divide up into car_files and notcar_files and shuffle
-        car_files = shuffle(glob.glob('./data/vehicles/*/*.png'))
-        notcar_files = shuffle(glob.glob('./data/non-vehicles/*/*.png'))
+        # Shuffle
+        car_files = shuffle(car_files)
+        notcar_files = shuffle(notcar_files)
 
         print('Total number of car files:', len(car_files))
         print('Total number of notcar files:', len(notcar_files))
