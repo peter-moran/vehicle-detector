@@ -7,7 +7,7 @@ Created: 9/14/2017
 """
 
 import sys
-from typing import Tuple, List, Iterable
+from typing import Tuple, Iterable
 
 import cv2
 import matplotlib.image as mpimg
@@ -15,7 +15,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 from sklearn.externals import joblib
 
-from train import CarFeatureVectorBuilder
+from train import CarFeatureVectorBuilder, get_hog_features, CARS
 
 Rectangle = Tuple[Tuple[int, int], Tuple[int, int]]
 '''A pair of (x, y) vertices defining a rectangle.'''
@@ -29,43 +29,55 @@ def draw_rectangles(img, rectangles: Iterable[Rectangle], color=(0, 0, 255), thi
     return imcopy
 
 
-def get_all_windows(img, window_shape=(64, 64), overlap=(0.5, 0.5), x_range=None, y_range=None) -> List[Rectangle]:
-    """ Returns a list of Rectangles of the given shape spaced over an image. """
-    # Fix range values
-    img_h, img_w = img.shape[0:2]
-    x_range = [None, None] if x_range is None else x_range
-    y_range = [None, None] if y_range is None else y_range
-    y_start = y_range[0] if y_range[0] is not None else 0
-    y_stop = y_range[1] if y_range[1] is not None else img_h
-    x_start = x_range[0] if x_range[0] is not None else 0
-    x_stop = x_range[1] if x_range[1] is not None else img_w
+def find_cars(img, clf, fvb: CarFeatureVectorBuilder, y_range, window_scale, window_overlap):
+    img = np.copy(img)[y_range[0]:y_range[1], :, :]
+    img_h, img_w = img.shape[:2]
 
-    # Build list of Rectangles
-    window_list = []
-    for y in range(y_start, y_stop, int(window_shape[0] * overlap[0])):
-        for x in range(x_start, x_stop, int(window_shape[1] * overlap[1])):
-            p_upper_left = (x, y)
-            p_lower_right = (x + window_shape[1], y + window_shape[0])
-            if p_lower_right[0] > img_w or p_lower_right[1] > img_h:
-                break
-            window_list.append((p_upper_left, p_lower_right))
-    return window_list
+    # Scale image to search for different size objects
+    if window_scale != 1.0:
+        img = cv2.resize(img, (int(img_w / window_scale), int(img_h / window_scale)))
 
+    # Calculate hog blocks for each desired image channel
+    hog_channels = get_hog_features(img, **fvb.hog_param)
 
-def search_windows(img, windows: Iterable[Rectangle], clf, feature_vector_builder, desired_label=1):
-    """ Classifies the content within each window and returns windows classified to the given label. """
+    # Number of hog blocks for this image in the xy direction
+    nblocks_x = hog_channels[0].shape[1]
+    nblocks_y = hog_channels[0].shape[0]
+
+    # The number of blocks we need per window (as required by classifier).
+    window_size = fvb.input_img_shape[0]
+    cells_per_window_edge = window_size // fvb.hog_param['pixels_per_cell_edge']
+    blocks_per_window_edge = \
+        cells_per_window_edge - fvb.hog_param['cells_per_block_edge'] + 1
+
+    # Step through all the windows by block increments
     desired_windows = []
-    for window in windows:
-        # Extract features from within the window
-        window_img = cv2.resize(img[window[0][1]:window[1][1], window[0][0]:window[1][0]], (64, 64))
-        features = feature_vector_builder.get_features([window_img])
+    cells_per_window_step = int((1 - window_overlap) * cells_per_window_edge)
+    for x_block_step in range((nblocks_x - blocks_per_window_edge) // cells_per_window_step):
+        for y_block_step in range((nblocks_y - blocks_per_window_edge) // cells_per_window_step):
+            # Get HOG features
+            xb_begin, yb_begin = [step * cells_per_window_step for step in (x_block_step, y_block_step)]
+            xb_end, yb_end = [begin + blocks_per_window_edge for begin in (xb_begin, yb_begin)]
+            hog_features = hog_channels[:, yb_begin:yb_end, xb_begin:xb_end].ravel()
 
-        # Classify
-        classification = clf.predict(features)
-        if classification == desired_label:
-            desired_windows.append(window)
+            # Get image patch for this window
+            x_px_begin = xb_begin * fvb.hog_param['pixels_per_cell_edge']
+            y_px_begin = yb_begin * fvb.hog_param['pixels_per_cell_edge']
+            x_px_end, y_px_end = [begin + window_size for begin in (x_px_begin, y_px_begin)]
+            window_img = cv2.resize(img[y_px_begin:y_px_end, x_px_begin:x_px_end], fvb.input_img_shape[:2])
+
+            # Get feature vector and classify
+            feature_vector = fvb.get_features_single((window_img, hog_features))
+            classification = clf.predict(feature_vector)
+
+            if classification == CARS:
+                # Transform back image patch coords back to original image space and save as rectangle
+                x_rec_left = int(x_px_begin * window_scale)
+                y_rec_top = int(y_px_begin * window_scale) + y_range[0]
+                draw_size = int(window_size * window_scale)
+                desired_windows.append(((x_rec_left, y_rec_top),
+                                        (x_rec_left + draw_size, y_rec_top + draw_size)))
     return desired_windows
-
 
 if __name__ == '__main__':
     # Load parameters
@@ -80,12 +92,11 @@ if __name__ == '__main__':
     scaler = joblib.load(scaler_savefile)
     fvb = CarFeatureVectorBuilder(feature_scaler=scaler)
 
-    image = mpimg.imread('./data/test_images/test7.jpg')
-    windows = get_all_windows(image, window_shape=(120, 120), overlap=(0.5, 0.5), y_range=(400, None))
+    image = mpimg.imread('./data/test_images/test4.jpg')
 
     print('Searching for cars in image...')
-    hot_windows = search_windows(image, windows, svc, fvb)
+    car_windows = find_cars(image, svc, fvb, y_range=(400, 656), window_scale=1.5, window_overlap=0.75)
 
-    window_img = draw_rectangles(image, hot_windows, color=(0, 0, 255), thick=6)
+    window_img = draw_rectangles(image, car_windows, color=(0, 0, 255), thick=6)
     plt.imshow(window_img)
     plt.show()

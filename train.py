@@ -8,7 +8,7 @@ Created: 9/12/2017
 import argparse
 import glob
 import time
-from typing import TypeVar, Callable, Sequence
+from typing import TypeVar, Callable, Sequence, Iterable
 
 import cv2
 import numpy as np
@@ -23,8 +23,11 @@ from sklearn.svm import SVC
 from sklearn.utils import shuffle
 from tqdm import tqdm
 
+NOTCARS = 0
+CARS = 1
 
-def hog_features(image, n_orient=9, pix_per_cell=8, cell_per_block=2, cspace='BGR', hog_channels='ALL'):
+
+def get_hog_features(image, orientations, pixels_per_cell_edge, cells_per_block_edge, cspace='BGR', channels='ALL'):
     # Apply color conversion
     if cspace != 'BGR':
         conversion = getattr(cv2, 'COLOR_BGR2{}'.format(cspace))
@@ -33,22 +36,22 @@ def hog_features(image, n_orient=9, pix_per_cell=8, cell_per_block=2, cspace='BG
         feature_image = np.copy(image)
 
     # Determine image channels to use
-    if hog_channels == 'ALL':
-        hog_channels = range(feature_image.shape[2])
+    if channels == 'ALL':
+        channels = range(feature_image.shape[2])
     else:
-        assert isinstance(hog_channels, Sequence[int]), "`hog_channels` must be a sequence of ints or 'ALL'."
+        assert isinstance(channels, Sequence[int]), "`channels` must be a sequence of ints or 'ALL'."
 
     # Collect HOG features
-    hog_features = []
-    for channel in hog_channels:
-        hog_features.append(hog(feature_image[:, :, channel],
-                                orientations=n_orient,
-                                pixels_per_cell=(pix_per_cell, pix_per_cell),
-                                cells_per_block=(cell_per_block, cell_per_block),
+    hog_channels = []  # channel stored separately
+    for channel in channels:
+        hog_channels.append(hog(feature_image[:, :, channel],
+                                orientations=orientations,
+                                pixels_per_cell=(pixels_per_cell_edge, pixels_per_cell_edge),
+                                cells_per_block=(cells_per_block_edge, cells_per_block_edge),
                                 transform_sqrt=True,
                                 block_norm='L2-Hys',
-                                feature_vector=True))
-    return np.ravel(hog_features)
+                                feature_vector=False))
+    return np.array(hog_channels)
 
 
 def bin_color_spatial(img, size=(32, 32)):
@@ -104,7 +107,7 @@ class FeatureVectorBuilder:
             raise
         return self.preprocessor_funcs[ndx](o)
 
-    def get_features(self, samples: Sample, verbose=0):
+    def get_features(self, samples: Iterable[Sample], verbose=0):
         if verbose >= 2:
             print('Extracting features...')
             t0 = time.time()
@@ -158,31 +161,43 @@ class FeatureVectorBuilder:
 
         return X
 
+    def get_features_single(self, sample: Sample, verbose=0):
+        return self.get_features([sample], verbose=verbose)
+
 
 class CarFeatureVectorBuilder(FeatureVectorBuilder):
-    def __init__(self, image_shape=(64, 64, 3), normalize_features=True, normalize_samples=False, feature_scaler=None):
+    def __init__(self, clf_img_shape=(64, 64, 3), normalize_features=True, normalize_samples=False,
+                 feature_scaler=None):
         """
         FeatureVectorBuilder initialized for identifying cars vs notcars.
 
         Used to ensure consistent feature extraction for all usage cases (eg training and classification).
         """
-        self.image_shape = image_shape
+        self.input_img_shape = clf_img_shape
+        assert clf_img_shape[0] == clf_img_shape[1], "CarFeatureVectorBuilder requires square image input."
         super().__init__(normalize_features, normalize_samples, feature_scaler)
 
         # Set up preprocessors
-        self.add_preprocessor(cv2.imread, str)
-        self.add_preprocessor(lambda img: img, ndarray)
+        self.add_preprocessor(lambda file: self.preprocess_file(file), str)  # filename -> (img, hog features)
+        self.add_preprocessor(lambda img_and_hog: img_and_hog, tuple)  # passthrough
 
         # Set up extractors
-        self.add_extractor(lambda img: hog_features(img, cspace='HSV', cell_per_block=3), 'HOG extraction')
-        self.add_extractor(bin_color_spatial, 'Spatial binning')
-        self.add_extractor(color_hist, 'Color histogram')
+        self.hog_param = {'orientations': 9, 'pixels_per_cell_edge': 8, 'cells_per_block_edge': 2,
+                          'cspace': 'BGR', 'channels': 'ALL'}
+        self.add_extractor(lambda img_and_hog: img_and_hog[1].ravel(), 'HOG extraction')  # pass through hog features
+        self.add_extractor(lambda img_and_hog: bin_color_spatial(img_and_hog[0]), 'Spatial binning')  # bin the img
+        self.add_extractor(lambda img_and_hog: color_hist(img_and_hog[0]), 'Color histogram')  # histogram the img
 
     def preprocess(self, o):
-        img = super().preprocess(o)
-        assert img.shape == self.image_shape, 'CarFeatureVectorBuilder is initialized for images of shape' \
-                                              ' {} not {}'.format(self.image_shape, img.shape)
-        return img
+        img, hog = super().preprocess(o)
+        assert img.shape == self.input_img_shape, 'CarFeatureVectorBuilder is initialized for images of shape' \
+                                                  ' {} not {}'.format(self.input_img_shape, img.shape)
+        return img, hog
+
+    def preprocess_file(self, file):
+        img = cv2.imread(file)
+        hog = get_hog_features(img, **self.hog_param).ravel()
+        return img, hog
 
 
 if __name__ == '__main__':
