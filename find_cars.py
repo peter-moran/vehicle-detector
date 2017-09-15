@@ -7,6 +7,7 @@ Created: 9/14/2017
 """
 
 import sys
+from glob import glob
 from typing import Tuple, Iterable
 
 import cv2
@@ -92,11 +93,13 @@ if __name__ == '__main__':
     scaler = joblib.load(scaler_savefile)
     fvb = CarFeatureVectorBuilder(feature_scaler=scaler)
 
-    image = mpimg.imread('./data/test_images/test4.jpg')
-
+    # Test images
     print('Searching for cars in image...')
-    car_windows = find_cars(image, svc, fvb, y_range=(400, 656), window_scale=1.5, window_overlap=0.75)
+    for imgf in sorted(glob('./data/test_images/*.jpg')):
+        image = mpimg.imread(imgf)
+        car_windows = find_cars(image, svc, fvb, y_range=(400, 656), window_scale=1.5, window_overlap=0.75)
 
-    window_img = draw_rectangles(image, car_windows, color=(0, 0, 255), thick=6)
-    plt.imshow(window_img)
+        window_img = draw_rectangles(image, car_windows, color=(0, 0, 255), thick=6)
+        plt.figure()
+        plt.imshow(window_img)
     plt.show()
