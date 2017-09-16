@@ -15,7 +15,7 @@ import numpy as np
 from moviepy.video.io.VideoFileClip import VideoFileClip
 from sklearn.externals import joblib
 
-from train import CarFeatureVectorBuilder, get_hog_features
+from feature_extraction import get_hog_features, CarFeatureVectorBuilder
 
 Rectangle = Tuple[Tuple[int, int], Tuple[int, int]]
 '''A pair of (x, y) vertices defining a rectangle.'''
