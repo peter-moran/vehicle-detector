@@ -13,6 +13,7 @@ import cv2
 import matplotlib.pyplot as plt
 import numpy as np
 from moviepy.video.io.VideoFileClip import VideoFileClip
+from scipy.ndimage.measurements import label
 from sklearn.externals import joblib
 
 from feature_extraction import get_hog_features, CarFeatureVectorBuilder
@@ -29,13 +30,27 @@ def draw_rectangles(img, rectangles: Iterable[Rectangle], color=(0, 0, 255), thi
     return imcopy
 
 
-def gen_heatmap(rectangles: Iterable[Rectangle], rectangle_scores, img_shape, color=(255, 0, 0)):
+def gen_heatmap(rectangles: Iterable[Rectangle], rectangle_scores, img_shape):
     heatmap = np.zeros(img_shape[:2])
     for rec, score in zip(rectangles, rectangle_scores):
         heatmap[rec[0][1]:rec[1][1], rec[0][0]:rec[1][0]] += score
-    heatmap = cv2.normalize(heatmap, None, 0.0, 1.0, cv2.NORM_MINMAX)
-    color_heat = cv2.merge([heatmap * c for c in color])
-    return color_heat.astype('uint8')
+    heatmap = cv2.normalize(heatmap, None, 0, 255, cv2.NORM_MINMAX)
+    return heatmap.astype('uint8')
+
+
+def draw_label_bboxes(img, labels):
+    for label_id in range(1, labels[1] + 1):
+        # Find the location of all pixels assigned to label_id
+        pixel_locs = (labels[0] == label_id).nonzero()
+
+        # Find the min/max x,y value of all the pixel_locs for this label
+        pixels_x = np.array(pixel_locs[0])
+        pixels_y = np.array(pixel_locs[1])
+        bbox = ((np.min(pixels_y), np.min(pixels_x)), (np.max(pixels_y), np.max(pixels_x)))
+
+        # Draw the box on the image
+        cv2.rectangle(img, bbox[0], bbox[1], (0, 0, 255), 6)
+    return img
 
 
 def window_search_cars(img, clf, fvb: CarFeatureVectorBuilder, y_range, window_scale, window_overlap):
@@ -91,26 +106,33 @@ def window_search_cars(img, clf, fvb: CarFeatureVectorBuilder, y_range, window_s
     # Select for desired windows
     desired_windows = []
     desired_windows_mag = []
+    min_score = 0.1
     for i, score in enumerate(classification_scores):
-        if score > 0:
+        if score >= min_score:
             desired_windows.append(window_positions[i])
-            desired_windows_mag.append(score)
+            desired_windows_mag.append(1)
     return desired_windows, desired_windows_mag
 
 
-def find_cars(image, svc, fvb):
+def find_cars(img, svc, fvb, viz):
     # Perform search over multiple scales
     searches = [(400, 500, 0.8, 6 / 8), (400, 660, 1.2, 6 / 8)]
     windows, window_scores = [], []
     for ystart, ystop, scale, overlap in searches:
-        w, ws = window_search_cars(image, svc, fvb, (ystart, ystop), scale, overlap)
+        w, ws = window_search_cars(img, svc, fvb, (ystart, ystop), scale, overlap)
         windows += w
         window_scores += ws
 
     # Display
-    heat = gen_heatmap(windows, window_scores, image.shape)
-    heat_img = cv2.addWeighted(image, 0.3, heat, 0.7, 0)
-    return draw_rectangles(heat_img, windows, color=(0, 0, 180), thick=2)
+    heatmap = gen_heatmap(windows, window_scores, img.shape[:2])
+    if viz == 'cars':
+        labels = label(heatmap)
+        ret = draw_label_bboxes(img, labels)
+    elif viz == 'windows':
+        heatmap = cv2.merge((heatmap, np.zeros_like(heatmap), np.zeros_like(heatmap)))
+        heatmap_overlay = cv2.addWeighted(img, 0.3, heatmap, 0.7, 0)
+        ret = draw_rectangles(heatmap_overlay, windows, color=(0, 0, 180), thick=2)
+    return ret
 
 
 if __name__ == '__main__':
@@ -127,6 +149,8 @@ if __name__ == '__main__':
                         help="File path to pickled trained classifier made by 'train.py'")
     parser.add_argument('-sc', '--scaler_savefile', type=str, default='./data/Xy_scaler.pkl',
                         help="File path to pickled StandardScalar made by 'train.py'")
+    parser.add_argument('-viz', '--visualize', type=str, default='cars',
+                        help="'cars' to draw bounding box around cars or 'windows' to show all the detected windows.")
     args = parser.parse_args()
 
     # Set up classifier and feature builder
@@ -139,10 +163,10 @@ if __name__ == '__main__':
     # Find cars in...
     if args.images_in is not None:  # run on images
         print('\nSearching for cars in images...')
-        for imgf in sorted(glob('./data/test_images/*.jpg')):
+        for imgf in sorted(glob(args.images_in)):
             # Find cars
             image = plt.imread(imgf)
-            display_img = find_cars(image, svc, fvb)
+            display_img = find_cars(image, svc, fvb, args.visualize)
 
             # Display
             plt.figure()
@@ -153,5 +177,5 @@ if __name__ == '__main__':
     else:  # run on video
         print("\nFinding cars in '{}'\nThen saving to  '{}'...".format(args.video_in, args.video_out))
         input_video = VideoFileClip(args.video_in)
-        output_video = input_video.fl_image(lambda img: find_cars(img, svc, fvb))
+        output_video = input_video.fl_image(lambda img: find_cars(img, svc, fvb, args.visualize))
         output_video.write_videofile(args.video_out, audio=False)
