@@ -5,14 +5,14 @@ Locates cars in video and places bounding boxes around them.
 Author: Peter Moran
 Created: 9/14/2017
 """
-
-import sys
+import argparse
 from glob import glob
 from typing import Tuple, Iterable
 
 import cv2
 import matplotlib.pyplot as plt
 import numpy as np
+from moviepy.video.io.VideoFileClip import VideoFileClip
 from sklearn.externals import joblib
 
 from train import CarFeatureVectorBuilder, get_hog_features
@@ -38,7 +38,7 @@ def gen_heatmap(rectangles: Iterable[Rectangle], rectangle_scores, img_shape, co
     return color_heat.astype('uint8')
 
 
-def find_cars(img, clf, fvb: CarFeatureVectorBuilder, y_range, window_scale, window_overlap):
+def window_search_cars(img, clf, fvb: CarFeatureVectorBuilder, y_range, window_scale, window_overlap):
     img = np.copy(img)[y_range[0]:y_range[1], :, :]
     img_h, img_w = img.shape[:2]
 
@@ -90,37 +90,61 @@ def find_cars(img, clf, fvb: CarFeatureVectorBuilder, y_range, window_scale, win
                 desired_windows_mag.append(classification_score)
     return desired_windows, desired_windows_mag
 
+
+def find_cars(image, svc, fvb):
+    # Perform search over multiple scales
+    searches = [(400, 500, 0.8, 6 / 8), (400, 660, 1.2, 6 / 8)]
+    windows, window_scores = [], []
+    for ystart, ystop, scale, overlap in searches:
+        w, ws = window_search_cars(image, svc, fvb, (ystart, ystop), scale, overlap)
+        windows += w
+        window_scores += ws
+
+    # Display
+    heat = gen_heatmap(windows, window_scores, image.shape)
+    heat_img = cv2.addWeighted(image, 0.3, heat, 0.7, 0)
+    return draw_rectangles(heat_img, windows, color=(0, 0, 180), thick=2)
+
+
 if __name__ == '__main__':
     # Load parameters
-    argc = len(sys.argv)
-    clf_savefile = sys.argv[1] if argc > 1 else './data/trained_classifier.pkl'
-    scaler_savefile = sys.argv[2] if argc > 2 else './data/Xy_scaler.pkl'
+    parser = argparse.ArgumentParser(description='Locates cars in video and places bounding boxes around them.',
+                                     usage='%(prog)s [ -vi & -vo | -img ] [extra_options]')
+    parser.add_argument('-vi', '--video_in', type=str, default='./data/test_videos/test_video.mp4',
+                        help='Video to find cars in.')
+    parser.add_argument('-vo', '--video_out', type=str, default='./data/test_videos/video_out.mp4',
+                        help='Where to save video to.')
+    parser.add_argument('-img', '--images_in', type=str,
+                        help='Search path (glob style) to test images. Cars will be found in images rather than video.')
+    parser.add_argument('-clf', '--clf_savefile', type=str, default='./data/trained_classifier.pkl',
+                        help="File path to pickled trained classifier made by 'train.py'")
+    parser.add_argument('-sc', '--scaler_savefile', type=str, default='./data/Xy_scaler.pkl',
+                        help="File path to pickled StandardScalar made by 'train.py'")
+    args = parser.parse_args()
 
     # Set up classifier and feature builder
-    print("Loading classifier from '{}'.".format(clf_savefile))
-    svc = joblib.load(clf_savefile)
-    print("Loading scaler from '{}'.".format(scaler_savefile))
-    scaler = joblib.load(scaler_savefile)
+    print("Loading classifier from '{}'.".format(args.clf_savefile))
+    svc = joblib.load(args.clf_savefile)
+    print("Loading scaler from '{}'.".format(args.scaler_savefile))
+    scaler = joblib.load(args.scaler_savefile)
     fvb = CarFeatureVectorBuilder(feature_scaler=scaler)
 
-    # Test images
-    print('Searching for cars in image...')
-    for imgf in sorted(glob('./data/test_images/*.jpg')):
-        image = plt.imread(imgf)
+    # Find cars in...
+    if args.images_in is not None:  # run on images
+        print('\nSearching for cars in images...')
+        for imgf in sorted(glob('./data/test_images/*.jpg')):
+            # Find cars
+            image = plt.imread(imgf)
+            display_img = find_cars(image, svc, fvb)
 
-        # Perform search over multiple scales
-        searches = [(400, 580, 0.8, 6 / 8), (400, 660, 1.8, 6 / 8)]
-        windows, window_scores = [], []
-        for ystart, ystop, scale, overlap in searches:
-            w, ws = find_cars(image, svc, fvb, (ystart, ystop), scale, overlap)
-            windows += w
-            window_scores += ws
+            # Display
+            plt.figure()
+            plt.imshow(display_img)
+            plt.title(imgf)
+        plt.show()
 
-        # Display
-        heat = gen_heatmap(windows, window_scores, image.shape)
-        heat_img = cv2.addWeighted(image, 0.3, heat, 0.7, 0)
-        window_img = draw_rectangles(heat_img, windows, color=(0, 0, 180), thick=2)
-        plt.figure()
-        plt.imshow(window_img)
-        plt.title(imgf)
-    plt.show()
+    else:  # run on video
+        print("\nFinding cars in '{}'\nThen saving to  '{}'...".format(args.video_in, args.video_out))
+        input_video = VideoFileClip(args.video_in)
+        output_video = input_video.fl_image(lambda img: find_cars(img, svc, fvb))
+        output_video.write_videofile(args.video_out, audio=False)
