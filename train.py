@@ -22,7 +22,8 @@ from feature_extraction import CarFeatureVectorBuilder
 NOTCARS = 0
 CARS = 1
 
-if __name__ == '__main__':
+
+def main():
     # Read arguments
     parser = argparse.ArgumentParser(description='Train classifier for cars vs not-cars.',
                                      usage='%(prog)s [(-cf & -ncf)? -sz | -xylf ] [additional options]')
@@ -128,3 +129,6 @@ if __name__ == '__main__':
     # Save the feature fvb and best model
     print('\nSaving best classifier to "{}".'.format(args.clf_savefile))
     joblib.dump(random_search.best_estimator_, args.clf_savefile)
+
+
+if __name__ == '__main__': main()
