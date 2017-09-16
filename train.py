@@ -129,6 +129,7 @@ class FeatureVectorBuilder:
             extractor_return_lens.append(len(example_ret))
         feature_vec_len = np.sum(extractor_return_lens)
 
+        # Print diagnostics
         if verbose >= 2:
             print('Feature vector length:', feature_vec_len)
             longest_name = max([len(name) for name in self.extractor_func_names])

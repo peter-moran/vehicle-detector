@@ -59,35 +59,42 @@ def window_search_cars(img, clf, fvb: CarFeatureVectorBuilder, y_range, window_s
     blocks_per_window_edge = \
         cells_per_window_edge - fvb.hog_param['cells_per_block_edge'] + 1
 
-    # Step through all the windows by block increments
-    desired_windows = []
-    desired_windows_mag = []
+    # Load all images and hog features
+    window_imgs = []
+    window_hogs = []
+    window_positions = []
     cells_per_window_step = int((1 - window_overlap) * cells_per_window_edge)
     for x_block_step in range((nblocks_x - blocks_per_window_edge) // cells_per_window_step):
         for y_block_step in range((nblocks_y - blocks_per_window_edge) // cells_per_window_step):
             # Get HOG features
             xb_begin, yb_begin = [step * cells_per_window_step for step in (x_block_step, y_block_step)]
             xb_end, yb_end = [begin + blocks_per_window_edge for begin in (xb_begin, yb_begin)]
-            hog_features = hog_channels[:, yb_begin:yb_end, xb_begin:xb_end].ravel()
+            window_hogs.append(hog_channels[:, yb_begin:yb_end, xb_begin:xb_end].ravel())
 
             # Get image patch for this window
             x_px_begin = xb_begin * fvb.hog_param['pixels_per_cell_edge']
             y_px_begin = yb_begin * fvb.hog_param['pixels_per_cell_edge']
             x_px_end, y_px_end = [begin + window_size for begin in (x_px_begin, y_px_begin)]
-            window_img = cv2.resize(img[y_px_begin:y_px_end, x_px_begin:x_px_end], fvb.input_img_shape[:2])
+            window_imgs.append(cv2.resize(img[y_px_begin:y_px_end, x_px_begin:x_px_end], fvb.input_img_shape[:2]))
 
-            # Get feature vector and classify
-            feature_vector = fvb.get_features_single((window_img, hog_features))
-            classification_score = clf.decision_function(feature_vector)
+            # Transform back image patch coords back to original image space and save as rectangle
+            x_rec_left = int(x_px_begin * window_scale)
+            y_rec_top = int(y_px_begin * window_scale) + y_range[0]
+            draw_size = int(window_size * window_scale)
+            window_positions.append(((x_rec_left, y_rec_top),
+                                     (x_rec_left + draw_size, y_rec_top + draw_size)))
 
-            if classification_score >= 0:
-                # Transform back image patch coords back to original image space and save as rectangle
-                x_rec_left = int(x_px_begin * window_scale)
-                y_rec_top = int(y_px_begin * window_scale) + y_range[0]
-                draw_size = int(window_size * window_scale)
-                desired_windows.append(((x_rec_left, y_rec_top),
-                                        (x_rec_left + draw_size, y_rec_top + draw_size)))
-                desired_windows_mag.append(classification_score)
+    # Get feature vector and classify in a batch
+    X = fvb.get_features(list(zip(window_imgs, window_hogs)))
+    classification_scores = clf.decision_function(X)
+
+    # Select for desired windows
+    desired_windows = []
+    desired_windows_mag = []
+    for i, score in enumerate(classification_scores):
+        if score > 0:
+            desired_windows.append(window_positions[i])
+            desired_windows_mag.append(score)
     return desired_windows, desired_windows_mag
 
 
