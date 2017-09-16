@@ -27,9 +27,9 @@ NOTCARS = 0
 CARS = 1
 
 
-def bgr2any(image, cspace):
-    if cspace != 'BGR':
-        conversion = getattr(cv2, 'COLOR_BGR2{}'.format(cspace))
+def rgb2any(image, cspace):
+    if cspace != 'RGB':
+        conversion = getattr(cv2, 'COLOR_RGB2{}'.format(cspace))
         feature_image = cv2.cvtColor(image, conversion)
     else:
         feature_image = np.copy(image)
@@ -37,9 +37,9 @@ def bgr2any(image, cspace):
     return feature_image
 
 
-def get_hog_features(image, orientations, pixels_per_cell_edge, cells_per_block_edge, cspace='BGR', channels='ALL'):
+def get_hog_features(image, orientations, pixels_per_cell_edge, cells_per_block_edge, cspace='RGB', channels='ALL'):
     # Apply color conversion
-    feature_image = bgr2any(image, cspace)
+    feature_image = rgb2any(image, cspace)
 
     # Determine image channels to use
     if channels == 'ALL':
@@ -60,15 +60,15 @@ def get_hog_features(image, orientations, pixels_per_cell_edge, cells_per_block_
     return np.array(hog_channels)
 
 
-def bin_color_spatial(img, size=(32, 32), cspace='BGR'):
-    img = bgr2any(img, cspace)
+def bin_color_spatial(img, size=(32, 32), cspace='RGB'):
+    img = rgb2any(img, cspace)
     features = cv2.resize(img, size).ravel()
     return features
 
 
-def color_hist(img, nbins=32, bins_range=(0, 256), cspace='BGR', channels='ALL'):
+def color_hist(img, nbins=32, bins_range=(0, 256), cspace='RGB', channels='ALL'):
     # Select channels to include
-    img = bgr2any(img, cspace)
+    img = rgb2any(img, cspace)
     if channels == 'ALL':
         channels = range(img.shape[2])
     else:
@@ -201,12 +201,14 @@ class CarFeatureVectorBuilder(FeatureVectorBuilder):
 
     def preprocess(self, o):
         img, hog = super().preprocess(o)
+        assert img.dtype == 'uint8', 'CarFeatureVectorBuilder is initialized uint8 images, not {}'.format(img.dtype)
         assert img.shape == self.input_img_shape, 'CarFeatureVectorBuilder is initialized for images of shape' \
                                                   ' {} not {}'.format(self.input_img_shape, img.shape)
         return img, hog
 
     def preprocess_file(self, file):
         img = cv2.imread(file)
+        cv2.cvtColor(img, cv2.COLOR_BGR2RGB, dst=img)
         hog = get_hog_features(img, **self.hog_param).ravel()
         return img, hog
 

@@ -106,10 +106,10 @@ if __name__ == '__main__':
     # Test images
     print('Searching for cars in image...')
     for imgf in sorted(glob('./data/test_images/*.jpg')):
-        image = cv2.imread(imgf)
+        image = plt.imread(imgf)
 
         # Perform search over multiple scales
-        searches = [(400, 580, 0.8, 6 / 8), (400, 660, 1.2, 6 / 8), (400, 660, 1.8, 6 / 8), (500, 700, 2.5, 6 / 8)]
+        searches = [(400, 580, 0.8, 6 / 8), (400, 660, 1.8, 6 / 8)]
         windows, window_scores = [], []
         for ystart, ystop, scale, overlap in searches:
             w, ws = find_cars(image, svc, fvb, (ystart, ystop), scale, overlap)
@@ -117,7 +117,6 @@ if __name__ == '__main__':
             window_scores += ws
 
         # Display
-        # TODO: Convert BGR to RGB?
         heat = gen_heatmap(windows, window_scores, image.shape)
         heat_img = cv2.addWeighted(image, 0.3, heat, 0.7, 0)
         window_img = draw_rectangles(heat_img, windows, color=(0, 0, 180), thick=2)
