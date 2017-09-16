@@ -83,6 +83,7 @@ def color_hist(img, nbins=32, bins_range=(0, 256), cspace='RGB', channels='ALL')
 
 
 class FeatureVectorBuilder:
+    # TODO: Switch to functional format
     Sample = TypeVar('Sample')
     ProcessedSample = TypeVar('ProcessedSample')
 
@@ -165,6 +166,8 @@ class FeatureVectorBuilder:
                 self.feature_scaler = StandardScaler().fit(X)
             X = self.feature_scaler.transform(X)
 
+            # TODO: Select for only important features?
+
         if verbose >= 2:
             print('Done (after {:.1f} seconds).'.format(time.time() - t0))
 
@@ -175,6 +178,7 @@ class FeatureVectorBuilder:
 
 
 class CarFeatureVectorBuilder(FeatureVectorBuilder):
+    # TODO: Switch FeatureVectorBuilder to functional format and use here
     def __init__(self, clf_img_shape=(64, 64, 3), normalize_features=True, normalize_samples=False,
                  feature_scaler=None):
         """
@@ -200,17 +204,23 @@ class CarFeatureVectorBuilder(FeatureVectorBuilder):
         self.add_extractor(
             lambda img_and_hog: color_hist(img_and_hog[0], cspace='YCrCb'), 'Color histogram')  # histogram the img
 
+    def preprocess_file(self, file):
+        img = cv2.imread(file)
+        cv2.cvtColor(img, cv2.COLOR_BGR2RGB, dst=img)
+        hog = get_hog_features(img, **self.hog_param).ravel()
+        return img, hog
+
     def preprocess(self, o):
         img, hog = super().preprocess(o)
         assert img.dtype == 'uint8', 'CarFeatureVectorBuilder is initialized uint8 images, not {}'.format(img.dtype)
         assert img.shape == self.input_img_shape, 'CarFeatureVectorBuilder is initialized for images of shape' \
                                                   ' {} not {}'.format(self.input_img_shape, img.shape)
-        return img, hog
+        # Normalize lighting
+        l, a, b = cv2.split(cv2.cvtColor(img, cv2.COLOR_RGB2LAB))
+        cv2.normalize(l, l, 0, 255, cv2.NORM_MINMAX)
+        img = cv2.cvtColor(cv2.merge((l, a, b)), cv2.COLOR_LAB2RGB)
 
-    def preprocess_file(self, file):
-        img = cv2.imread(file)
-        cv2.cvtColor(img, cv2.COLOR_BGR2RGB, dst=img)
-        hog = get_hog_features(img, **self.hog_param).ravel()
+        # TODO: Pre-convert to a different default image space?
         return img, hog
 
 
@@ -272,7 +282,7 @@ if __name__ == '__main__':
         # Save features
         xy_savepath, ext = args.xy_savefile.rsplit('.', 1)
         print("Saving features to '{}'.".format(args.xy_savefile))
-        joblib.dump((X, y), args.xy_savefile)
+        joblib.dump((X, y), args.xy_savefile, compress=3)
         scaler_save_file = '{}_scaler.{}'.format(xy_savepath, ext)
         print("Saving `StandardScaler` for this feature set to '{}'.".format(scaler_save_file))
         joblib.dump(feature_builder.feature_scaler, scaler_save_file)
@@ -295,8 +305,8 @@ if __name__ == '__main__':
     X_train, X_valid, y_train, y_valid = train_test_split(X, y, test_size=0.33)
 
     # Grid search parameters
-    param_dist = {'C': expon(scale=20),
-                  'gamma': expon(scale=.0005),
+    param_dist = {'C': expon(scale=100),
+                  'gamma': expon(scale=.001),
                   'kernel': ['rbf']}
 
     # Perform grid search
@@ -315,6 +325,7 @@ if __name__ == '__main__':
         print('\t{:0.3f} (+/-{:0.03f}) for {!r}'.format(mean, std * 2, params))
     print('\nBest SVC score: {:0.3f}'.format(random_search.best_score_))
     print('Best SVC parameters set: {}'.format(random_search.best_params_))
+    print('Number of support vectors (impacts prediction time): {}'.format(random_search.best_estimator_.n_support_))
 
     # Save the feature fvb and best model
     print('\nSaving best classifier to "{}".'.format(args.clf_savefile))

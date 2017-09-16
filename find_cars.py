@@ -119,7 +119,7 @@ if __name__ == '__main__':
                                      usage='%(prog)s [ -vi & -vo | -img ] [extra_options]')
     parser.add_argument('-vi', '--video_in', type=str, default='./data/test_videos/test_video.mp4',
                         help='Video to find cars in.')
-    parser.add_argument('-vo', '--video_out', type=str, default='./data/test_videos/video_out.mp4',
+    parser.add_argument('-vo', '--video_out', type=str, default='./output/video_out.mp4',
                         help='Where to save video to.')
     parser.add_argument('-img', '--images_in', type=str,
                         help='Search path (glob style) to test images. Cars will be found in images rather than video.')
