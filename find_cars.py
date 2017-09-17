@@ -37,28 +37,32 @@ def gen_heatmap(rectangles: Iterable[Rectangle], rectangle_scores, img_shape):
     return heatmap
 
 
-def draw_label_bboxes(img, labels, color=(0, 0, 255), thick=6):
+def hot_label_regions(score_img, labels, threshold):
+    bboxes = []
     for label_id in range(1, labels[1] + 1):
         # Find the location of all pixels assigned to label_id
         pixel_locs = (labels[0] == label_id).nonzero()
 
-        # Find the min/max x,y value of all the pixel_locs for this label
-        pixels_x = np.array(pixel_locs[0])
-        pixels_y = np.array(pixel_locs[1])
-        bbox = ((np.min(pixels_y), np.min(pixels_x)), (np.max(pixels_y), np.max(pixels_x)))
+        # Find the min/max x, y value of all the pixel_locs for this label
+        pixels_y = np.array(pixel_locs[0])
+        pixels_x = np.array(pixel_locs[1])
+        bbox = ((np.min(pixels_x), np.min(pixels_y)), (np.max(pixels_x), np.max(pixels_y)))
 
-        # Draw the box on the image
-        cv2.rectangle(img, bbox[0], bbox[1], color, thick)
-    return img
+        # Check score at the core is enough
+        if score_img[(bbox[0][1] + bbox[1][1]) // 2, (bbox[0][0] + bbox[1][0]) // 2] >= threshold:
+            bboxes.append(bbox)
+
+    return bboxes
 
 
 class CarFinder:
-    def __init__(self, classifier, feature_vector_builder, visualization, n_heatmap_history=15, min_avg_score=0.3):
-        self.min_avg_score = min_avg_score
+    def __init__(self, classifier, feature_vector_builder, visualization, history=15, thresh_low=0.1, thresh_high=0.3):
+        self.thresh_low = thresh_low
+        self.thresh_high = thresh_high
         self.clf = classifier
         self.fvb = feature_vector_builder
         self.viz = visualization
-        self.n_heatmap_history = n_heatmap_history
+        self.heatmap_history = history
         self.nlast_heatmaps = []
 
     def window_search_cars(self, img, y_range, window_scale, window_overlap):
@@ -124,7 +128,7 @@ class CarFinder:
 
     def find_cars(self, img, single=False):
         # Perform search over multiple scales
-        searches = [(380, 660, 1.5, 5 / 8)]
+        searches = [(380, 660, 1.5, 6 / 8)]
         windows, window_scores = [], []
         for ystart, ystop, scale, overlap in searches:
             w, ws = self.window_search_cars(img, (ystart, ystop), scale, overlap)
@@ -138,27 +142,35 @@ class CarFinder:
         else:
             # Add heatmap to history
             self.nlast_heatmaps.append(current_heatmap)
-            if len(self.nlast_heatmaps) > self.n_heatmap_history:
-                self.nlast_heatmaps = self.nlast_heatmaps[-self.n_heatmap_history:]
+            if len(self.nlast_heatmaps) > self.heatmap_history:
+                self.nlast_heatmaps = self.nlast_heatmaps[-self.heatmap_history:]
             # Integrate over history
             heatmap = sum(self.nlast_heatmaps)
 
-        # Display
-        min_car_heat = len(self.nlast_heatmaps) * self.min_avg_score
-        if self.viz == 'cars' or self.viz == 'windows':
-            heatmap_enough = np.copy(heatmap)
-            heatmap_enough[heatmap < min_car_heat] = 0
-            labels = label(heatmap_enough)
-            ret = draw_label_bboxes(img, labels, color=(0, 255, 0), thick=10)
+        # Remove very weak parts of the heatmap
+        min_heat = len(self.nlast_heatmaps) * self.thresh_low
+        max_heat = len(self.nlast_heatmaps) * self.thresh_high
+        heatmap_thresh = np.copy(heatmap)
+        heatmap_thresh[heatmap < min_heat] = 0
+
+        # Label the heatmap and only keep regions that are hot enough at their center
+        labels = label(heatmap_thresh)
+        bboxes = hot_label_regions(heatmap_thresh, labels, threshold=max_heat)
+
+        # Visualize
+        ret_img = np.copy(img)
+        for bbox in bboxes:
+            ret_img = cv2.rectangle(ret_img, bbox[0], bbox[1], color=(0, 255, 0), thickness=6)
         if self.viz == 'windows':
             heatmap_limtd = np.copy(heatmap)
-            heatmap_limtd[heatmap > min_car_heat] = min_car_heat
+            heatmap_limtd[heatmap > max_heat] = max_heat
             cv2.normalize(heatmap_limtd, heatmap_limtd, 0, 255, cv2.NORM_MINMAX)
             heatmap_limtd = heatmap_limtd.astype('uint8')
             heatmap_limtd = cv2.merge((heatmap_limtd, np.zeros_like(heatmap_limtd), np.zeros_like(heatmap_limtd)))
-            heatmap_overlay = cv2.addWeighted(ret, 0.3, heatmap_limtd, 0.7, 0)
-            ret = draw_rectangles(heatmap_overlay, windows, color=(0, 0, 180), thick=2)
-        return ret
+            heatmap_overlay = cv2.addWeighted(ret_img, 0.3, heatmap_limtd, 0.7, 0)
+            ret_img = draw_rectangles(heatmap_overlay, windows, color=(0, 0, 180), thick=2)
+
+        return ret_img
 
 
 def main():
