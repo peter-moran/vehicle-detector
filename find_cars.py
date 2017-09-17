@@ -37,7 +37,7 @@ def gen_heatmap(rectangles: Iterable[Rectangle], rectangle_scores, img_shape):
     return heatmap
 
 
-def draw_label_bboxes(img, labels):
+def draw_label_bboxes(img, labels, color=(0, 0, 255), thick=6):
     for label_id in range(1, labels[1] + 1):
         # Find the location of all pixels assigned to label_id
         pixel_locs = (labels[0] == label_id).nonzero()
@@ -48,13 +48,13 @@ def draw_label_bboxes(img, labels):
         bbox = ((np.min(pixels_y), np.min(pixels_x)), (np.max(pixels_y), np.max(pixels_x)))
 
         # Draw the box on the image
-        cv2.rectangle(img, bbox[0], bbox[1], (0, 0, 255), 6)
+        cv2.rectangle(img, bbox[0], bbox[1], color, thick)
     return img
 
 
 class CarFinder:
-    def __init__(self, classifier, feature_vector_builder, visualization, n_heatmap_history=8, min_car_uptime=0.75):
-        self.min_car_uptime = min_car_uptime
+    def __init__(self, classifier, feature_vector_builder, visualization, n_heatmap_history=15, min_avg_score=0.3):
+        self.min_avg_score = min_avg_score
         self.clf = classifier
         self.fvb = feature_vector_builder
         self.viz = visualization
@@ -115,16 +115,16 @@ class CarFinder:
         # Select for desired windows
         desired_windows = []
         desired_windows_mag = []
-        min_score = 0.1
+        min_score = 0
         for i, score in enumerate(classification_scores):
-            if score >= min_score:
+            if score > min_score:
                 desired_windows.append(window_positions[i])
-                desired_windows_mag.append(1)
+                desired_windows_mag.append(score)
         return desired_windows, desired_windows_mag
 
     def find_cars(self, img, single=False):
         # Perform search over multiple scales
-        searches = [(380, 500, 0.8, 6 / 8), (380, 660, 1.5, 6 / 8)]
+        searches = [(380, 660, 1.5, 5 / 8)]
         windows, window_scores = [], []
         for ystart, ystop, scale, overlap in searches:
             w, ws = self.window_search_cars(img, (ystart, ystop), scale, overlap)
@@ -139,20 +139,24 @@ class CarFinder:
             # Add heatmap to history
             self.nlast_heatmaps.append(current_heatmap)
             if len(self.nlast_heatmaps) > self.n_heatmap_history:
-                self.nlast_heatmaps = self.nlast_heatmaps[:-self.n_heatmap_history]
+                self.nlast_heatmaps = self.nlast_heatmaps[-self.n_heatmap_history:]
             # Integrate over history
             heatmap = sum(self.nlast_heatmaps)
 
         # Display
-        if self.viz == 'cars':
-            heatmap[heatmap <= len(self.nlast_heatmaps) * self.min_car_uptime] = 0
-            labels = label(heatmap)
-            ret = draw_label_bboxes(img, labels)
-        elif self.viz == 'windows':
-            cv2.normalize(heatmap, heatmap, 0, 255, cv2.NORM_MINMAX)
-            heatmap = heatmap.astype('uint8')
-            heatmap = cv2.merge((heatmap, np.zeros_like(heatmap), np.zeros_like(heatmap)))
-            heatmap_overlay = cv2.addWeighted(img, 0.3, heatmap, 0.7, 0)
+        min_car_heat = len(self.nlast_heatmaps) * self.min_avg_score
+        if self.viz == 'cars' or self.viz == 'windows':
+            heatmap_enough = np.copy(heatmap)
+            heatmap_enough[heatmap < min_car_heat] = 0
+            labels = label(heatmap_enough)
+            ret = draw_label_bboxes(img, labels, color=(0, 255, 0), thick=10)
+        if self.viz == 'windows':
+            heatmap_limtd = np.copy(heatmap)
+            heatmap_limtd[heatmap > min_car_heat] = min_car_heat
+            cv2.normalize(heatmap_limtd, heatmap_limtd, 0, 255, cv2.NORM_MINMAX)
+            heatmap_limtd = heatmap_limtd.astype('uint8')
+            heatmap_limtd = cv2.merge((heatmap_limtd, np.zeros_like(heatmap_limtd), np.zeros_like(heatmap_limtd)))
+            heatmap_overlay = cv2.addWeighted(ret, 0.3, heatmap_limtd, 0.7, 0)
             ret = draw_rectangles(heatmap_overlay, windows, color=(0, 0, 180), thick=2)
         return ret
 
@@ -200,10 +204,11 @@ def main():
         for ax, f, img in zip(axes.flatten(), files, imgs):
             ax.imshow(img)
             ax.set_title(f)
+            ax.axis('off')
         plt.show()
 
     else:  # run on video
-        print("\nFinding cars in '{},'\nthen saving to  '{}'...".format(args.video_in, args.video_out))
+        print("\nFinding cars in '{}',\nthen saving to  '{}'...".format(args.video_in, args.video_out))
         input_video = VideoFileClip(args.video_in)
         output_video = input_video.fl_image(car_finder.find_cars)
         output_video.write_videofile(args.video_out, audio=False)
