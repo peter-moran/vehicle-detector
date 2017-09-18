@@ -9,30 +9,29 @@ from sklearn.preprocessing import scale
 from tqdm import tqdm
 
 
-def rgb2any(image, cspace):
-    if cspace != 'RGB':
-        conversion = getattr(cv2, 'COLOR_RGB2{}'.format(cspace))
-        feature_image = cv2.cvtColor(image, conversion)
+def cspace_transform(img, c_from, c_to):
+    if c_to != c_from:
+        conversion = getattr(cv2, 'COLOR_{}2{}'.format(c_from, c_to))
+        feature_image = cv2.cvtColor(img, conversion)
     else:
-        feature_image = np.copy(image)
-
+        feature_image = img
     return feature_image
 
 
-def get_hog_features(image, orientations, pixels_per_cell_edge, cells_per_block_edge, cspace='RGB', channels='ALL'):
+def get_hog_features(img, orientations, pixels_per_cell_edge, cells_per_block_edge, c_from, c_to, channels='ALL'):
     # Apply color conversion
-    feature_image = rgb2any(image, cspace)
+    img = cspace_transform(img, c_from, c_to)
 
-    # Determine image channels to use
+    # Determine img channels to use
     if channels == 'ALL':
-        channels = range(feature_image.shape[2])
+        channels = range(img.shape[2])
     else:
         assert isinstance(channels, Sequence[int]), "`channels` must be a sequence of ints or 'ALL'."
 
     # Collect HOG features
     hog_channels = []  # channel stored separately
     for channel in channels:
-        hog_channels.append(hog(feature_image[:, :, channel],
+        hog_channels.append(hog(img[:, :, channel],
                                 orientations=orientations,
                                 pixels_per_cell=(pixels_per_cell_edge, pixels_per_cell_edge),
                                 cells_per_block=(cells_per_block_edge, cells_per_block_edge),
@@ -42,15 +41,15 @@ def get_hog_features(image, orientations, pixels_per_cell_edge, cells_per_block_
     return np.array(hog_channels)
 
 
-def bin_color_spatial(img, size=(32, 32), cspace='RGB'):
-    img = rgb2any(img, cspace)
+def bin_color_spatial(img, c_from, c_to, size=(32, 32)):
+    img = cspace_transform(img, c_from, c_to)
     features = cv2.resize(img, size).ravel()
     return features
 
 
-def color_hist(img, nbins=32, bins_range=(0, 256), cspace='RGB', channels='ALL'):
+def color_hist(img, c_from, c_to, nbins=32, bins_range=(0, 256), channels='ALL'):
     # Select channels to include
-    img = rgb2any(img, cspace)
+    img = cspace_transform(img, c_from, c_to)
     if channels == 'ALL':
         channels = range(img.shape[2])
     else:
@@ -141,8 +140,9 @@ class CarFeatureVectorBuilder:
         assert clf_img_shape[0] == clf_img_shape[1], "CarFeatureVectorBuilder requires square image input."
 
         # Global feature extraction settings.
-        self.hog_param = {'orientations': 9, 'pixels_per_cell_edge': 8, 'cells_per_block_edge': 2, 'cspace': 'YCrCb',
-                          'channels': 'ALL'}
+        self.cspace_default = 'YCrCb'
+        self.hog_param = {'orientations': 9, 'pixels_per_cell_edge': 8, 'cells_per_block_edge': 2, 'c_from': 'RGB',
+                          'c_to': 'YCrCb', 'channels': 'ALL'}
 
     def get_features(self, samples, verbose=0):
         # Set up preprocessor.
@@ -156,21 +156,18 @@ class CarFeatureVectorBuilder:
         # Set up extractors. All will expect input to be a tuple (image_patch, hog_features).
         extractor_func_names = ['HOG features', 'Spatial histogram', ' Color histogram']
         feat_extract_funcs = [lambda sample: sample[1].ravel(),
-                              lambda sample: bin_color_spatial(sample[0], cspace='YCrCb'),
-                              lambda sample: color_hist(sample[0], cspace='YCrCb')]
+                              lambda sample: bin_color_spatial(sample[0], c_from=self.cspace_default, c_to='YCrCb'),
+                              lambda sample: color_hist(sample[0], c_from=self.cspace_default, c_to='YCrCb')]
 
         # Extract features
         X = generate_feature_vectors(samples, feat_extract_funcs, extractor_func_names, preprocess,
                                      self.feature_scaler, verbose=verbose)
         return X
 
-    def _preprocess_files(self, sample: str):
-        img = cv2.imread(sample)
-        cv2.cvtColor(img, cv2.COLOR_BGR2RGB, dst=img)
-        hog = get_hog_features(img, **self.hog_param).ravel()
-        return self._preprocess_img_hog((img, hog))
-
     def _preprocess_img_hog(self, sample: Tuple[ndarray, ndarray]):
+        """
+        img should be RGB
+        """
         img, hog = sample
         assert img.dtype == 'uint8', 'CarFeatureVectorBuilder is initialized uint8 images, not {}'.format(img.dtype)
         assert img.shape == self.input_img_shape, 'CarFeatureVectorBuilder is initialized for images of shape' \
@@ -178,7 +175,13 @@ class CarFeatureVectorBuilder:
         # Normalize lighting
         l, a, b = cv2.split(cv2.cvtColor(img, cv2.COLOR_RGB2LAB))
         cv2.normalize(l, l, 0, 255, cv2.NORM_MINMAX)
-        img = cv2.cvtColor(cv2.merge((l, a, b)), cv2.COLOR_LAB2RGB)
+        img = cspace_transform(cv2.merge((l, a, b)), 'LAB', 'RGB')
+        img = cspace_transform(img, 'RGB', self.cspace_default)
 
-        # TODO: Pre-convert to a different default image space?
         return img, hog
+
+    def _preprocess_files(self, sample: str):
+        img = cv2.imread(sample)
+        cv2.cvtColor(img, cv2.COLOR_BGR2RGB, dst=img)
+        hog = get_hog_features(img, **self.hog_param).ravel()
+        return self._preprocess_img_hog((img, hog))
