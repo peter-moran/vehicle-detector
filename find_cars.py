@@ -56,7 +56,10 @@ def hot_label_regions(score_img, labels, threshold):
 
 
 class CarFinder:
-    def __init__(self, classifier, feature_vector_builder, visualization, history=15, thresh_low=0.1, thresh_high=0.3):
+    def __init__(self, classifier, feature_vector_builder, visualization, history=16, thresh_low=0.1, thresh_high=0.25):
+        self.search_settings = [(380, 500, 1, 6 / 8), (380, 550, 1.3, 5 / 8), (380, 600, 2.2, 6 / 8)]
+        self.x_range = [0, 1280]
+        self.max_frame_heat = thresh_high * 1.5
         self.thresh_low = thresh_low
         self.thresh_high = thresh_high
         self.clf = classifier
@@ -65,8 +68,8 @@ class CarFinder:
         self.heatmap_history = history
         self.nlast_heatmaps = []
 
-    def window_search_cars(self, img, y_range, window_scale, window_overlap):
-        img = np.copy(img)[y_range[0]:y_range[1], :, :]
+    def window_search_cars(self, img, x_range, y_range, window_scale, window_overlap):
+        img = np.copy(img)[y_range[0]:y_range[1], x_range[0]:x_range[1], :]
         img_h, img_w = img.shape[:2]
 
         # Scale image to search for different size objects
@@ -106,7 +109,7 @@ class CarFinder:
                     cv2.resize(img[y_px_begin:y_px_end, x_px_begin:x_px_end], self.fvb.input_img_shape[:2]))
 
                 # Transform back image patch coords back to original image space and save as rectangle
-                x_rec_left = int(x_px_begin * window_scale)
+                x_rec_left = int(x_px_begin * window_scale) + x_range[0]
                 y_rec_top = int(y_px_begin * window_scale) + y_range[0]
                 draw_size = int(window_size * window_scale)
                 window_positions.append(((x_rec_left, y_rec_top),
@@ -128,15 +131,15 @@ class CarFinder:
 
     def find_cars(self, img, single=False):
         # Perform search over multiple scales
-        searches = [(380, 660, 1.5, 6 / 8)]
         windows, window_scores = [], []
-        for ystart, ystop, scale, overlap in searches:
-            w, ws = self.window_search_cars(img, (ystart, ystop), scale, overlap)
+        for ystart, ystop, scale, overlap in self.search_settings:
+            w, ws = self.window_search_cars(img, self.x_range, (ystart, ystop), scale, overlap)
             windows += w
             window_scores += ws
 
         # Make heatmap
         current_heatmap = gen_heatmap(windows, window_scores, img.shape[:2])
+        current_heatmap[current_heatmap > self.max_frame_heat] = self.max_frame_heat
         if single:
             heatmap = current_heatmap
         else:
@@ -148,14 +151,14 @@ class CarFinder:
             heatmap = sum(self.nlast_heatmaps)
 
         # Remove very weak parts of the heatmap
-        min_heat = len(self.nlast_heatmaps) * self.thresh_low
-        max_heat = len(self.nlast_heatmaps) * self.thresh_high
+        heat_thresh_low = len(self.nlast_heatmaps) * self.thresh_low
+        heat_thresh_high = len(self.nlast_heatmaps) * self.thresh_high
         heatmap_thresh = np.copy(heatmap)
-        heatmap_thresh[heatmap < min_heat] = 0
+        heatmap_thresh[heatmap < heat_thresh_low] = 0
 
         # Label the heatmap and only keep regions that are hot enough at their center
         labels = label(heatmap_thresh)
-        bboxes = hot_label_regions(heatmap_thresh, labels, threshold=max_heat)
+        bboxes = hot_label_regions(heatmap_thresh, labels, threshold=heat_thresh_high)
 
         # Visualize
         ret_img = np.copy(img)
@@ -163,12 +166,12 @@ class CarFinder:
             ret_img = cv2.rectangle(ret_img, bbox[0], bbox[1], color=(0, 255, 0), thickness=6)
         if self.viz == 'windows':
             heatmap_limtd = np.copy(heatmap)
-            heatmap_limtd[heatmap > max_heat] = max_heat
+            heatmap_limtd[heatmap > heat_thresh_high] = heat_thresh_high
             cv2.normalize(heatmap_limtd, heatmap_limtd, 0, 255, cv2.NORM_MINMAX)
             heatmap_limtd = heatmap_limtd.astype('uint8')
             heatmap_limtd = cv2.merge((heatmap_limtd, np.zeros_like(heatmap_limtd), np.zeros_like(heatmap_limtd)))
-            heatmap_overlay = cv2.addWeighted(ret_img, 0.3, heatmap_limtd, 0.7, 0)
-            ret_img = draw_rectangles(heatmap_overlay, windows, color=(0, 0, 180), thick=2)
+            heatmap_overlay = cv2.addWeighted(ret_img, 0.4, heatmap_limtd, 0.6, 0)
+            ret_img = draw_rectangles(heatmap_overlay, windows, color=(0, 0, 180), thick=1)
 
         return ret_img
 
