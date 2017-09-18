@@ -12,8 +12,8 @@ from glob import glob
 import numpy as np
 from scipy.stats import expon
 from sklearn.externals import joblib
-from sklearn.model_selection import RandomizedSearchCV
-from sklearn.model_selection import train_test_split
+from sklearn.model_selection import RandomizedSearchCV, train_test_split
+from sklearn.preprocessing import StandardScaler
 from sklearn.svm import SVC
 from sklearn.utils import shuffle
 
@@ -71,12 +71,16 @@ def main():
         print('Using {} samples each, {} samples total.\n'.format(args.sample_size, args.sample_size * 2))
 
         # Define feature fvb
-        feature_builder = CarFeatureVectorBuilder()
+        fvb = CarFeatureVectorBuilder()
 
         # Extract features
         X_files = car_files[:args.sample_size] + notcar_files[:args.sample_size]
-        X = feature_builder.get_features(X_files, verbose=2)
+        X = fvb.get_features(X_files, verbose=2)
         y = np.hstack((np.ones(args.sample_size), np.zeros(args.sample_size)))
+
+        # Normalize across features
+        fvb.feature_scaler = StandardScaler().fit(X)
+        X = fvb.feature_scaler.transform(X)
 
         # Save features
         xy_savepath, ext = args.xy_savefile.rsplit('.', 1)
@@ -84,7 +88,7 @@ def main():
         joblib.dump((X, y), args.xy_savefile, compress=3)
         scaler_save_file = '{}_scaler.{}'.format(xy_savepath, ext)
         print("Saving `StandardScaler` for this feature set to '{}'.".format(scaler_save_file))
-        joblib.dump(feature_builder.feature_scaler, scaler_save_file)
+        joblib.dump(fvb.feature_scaler, scaler_save_file)
 
         if args.save_remainder:
             n_remainder = n_smaller_class - args.sample_size
@@ -95,7 +99,7 @@ def main():
             # Build unused features and save
             X_unused_files = \
                 car_files[args.sample_size: n_smaller_class] + notcar_files[args.sample_size: n_smaller_class]
-            X_unused = feature_builder.get_features(X_unused_files, verbose=1)
+            X_unused = fvb.get_features(X_unused_files, verbose=1)
             y_unused = np.hstack((np.ones(n_remainder), np.zeros(n_remainder)))
             print("Done. Saving to '{}'.".format(Xy_unused_save_file))
             joblib.dump((X_unused, y_unused), Xy_unused_save_file)
