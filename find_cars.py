@@ -7,7 +7,7 @@ Created: 9/14/2017
 """
 import argparse
 from glob import glob
-from typing import Tuple, Iterable
+from typing import Iterable, Tuple
 
 import cv2
 import matplotlib.pyplot as plt
@@ -16,7 +16,7 @@ from moviepy.video.io.VideoFileClip import VideoFileClip
 from scipy.ndimage.measurements import label
 from sklearn.externals import joblib
 
-from feature_extraction import get_hog_features, CarFeatureVectorBuilder
+from feature_extraction import CarFeatureVectorBuilder, get_hog_features
 
 Rectangle = Tuple[Tuple[int, int], Tuple[int, int]]
 '''A pair of (x, y) vertices defining a rectangle.'''
@@ -188,6 +188,10 @@ def main():
                         help="File path to pickled StandardScalar made by 'train.py'")
     parser.add_argument('-viz', '--visualization', type=str, default='cars',
                         help="'cars' to draw bounding box around cars or 'windows' to show all the detected windows.")
+    parser.add_argument('-st', '--start', type=int, default=0,
+                        help="Timestamp (seconds) to start video.")
+    parser.add_argument('-nd', '--end', type=int, default=None,
+                        help="Timestamp (seconds) to end video.")
     args = parser.parse_args()
     name, ext = args.video_in.split('/')[-1].rsplit('.', 1)
     args.video_out = './output/{}_{}.{}'.format(name, args.visualization, ext)
@@ -222,7 +226,7 @@ def main():
     else:  # run on video
         print("\nFinding cars in '{}',\nthen saving to  '{}'...".format(args.video_in, args.video_out))
         input_video = VideoFileClip(args.video_in)
-        output_video = input_video.fl_image(car_finder.find_cars)
+        output_video = input_video.fl_image(car_finder.find_cars).subclip(args.start, args.end)
         output_video.write_videofile(args.video_out, audio=False)
 
 
