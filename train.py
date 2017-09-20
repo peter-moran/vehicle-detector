@@ -2,6 +2,8 @@
 """
 Trains a classifier to recognise car vs not-car images.
 
+See README.md or run `train.py -h` for usage.
+
 Author: Peter Moran
 Created: 9/12/2017
 """

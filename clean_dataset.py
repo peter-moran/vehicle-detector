@@ -1,3 +1,13 @@
+#!/usr/bin/env python
+"""
+Returns an image dataset with near-duplicate images removed.
+
+See README.md or run `clean_dataset.py -h` for usage.
+
+Author: Peter Moran
+Created: 9/15/2017
+"""
+
 import argparse
 from glob import glob
 from time import sleep
@@ -19,7 +29,8 @@ if __name__ == '__main__':
     parser.add_argument('load_path', type=str, help='File search pattern to find images (glob style).')
     parser.add_argument('save_path', type=str, help='Location to save the pickled list of unique files.')
     parser.add_argument('-hd', '--min_hamming_distance', type=int, default=10,
-                        help='Minimum hamming distance needed to be considered unique.')
+                        help='Minimum hamming distance needed to be considered unique. '
+                             'Increase to require greater uniqueness.')
     parser.add_argument('-lm', '--limit', type=int, default=None, help='Only run on first n files.')
     args = parser.parse_args()
 
@@ -33,6 +44,7 @@ if __name__ == '__main__':
     hashes_seen = set()
     unique_files = []
 
+    # Calculate the hash for each image, check it against all previous images. Keep if hamming distance is large enough.
     sleep(.01)
     for image_path in tqdm(files):
         # Get image hash
@@ -56,7 +68,7 @@ if __name__ == '__main__':
     print('Saving list of file names to {}).'.format(args.save_path))
     joblib.dump(unique_files, args.save_path)
 
-    # Plot origonal set
+    # Plot examples from origonal set
     nrows, ncols = 6, 10
     fig, axes = plt.subplots(nrows, ncols)
     plt.suptitle('Original Set (first {})'.format(len(axes.flatten())))
@@ -65,7 +77,7 @@ if __name__ == '__main__':
         ax.set_title(files[i].split('.')[-2][-4:])
         ax.axis('off')
 
-    # Plot filtered set
+    # Plot examples from filtered set
     fig, axes = plt.subplots(nrows, ncols)
     plt.suptitle('Filtered Set (first {})'.format(len(axes.flatten())))
     for i, ax in enumerate(axes.flatten()):

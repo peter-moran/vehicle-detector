@@ -1,5 +1,13 @@
+#!/usr/bin/env python
+"""
+Contains all functions needed by this project to extract features from images.
+
+Author: Peter Moran
+Created: 9/16/2017
+"""
+
 import time
-from typing import Sequence, Tuple, TypeVar
+from typing import Sequence, Tuple
 
 import cv2
 import numpy as np
@@ -9,7 +17,8 @@ from sklearn.preprocessing import scale
 from tqdm import tqdm
 
 
-def cspace_transform(img, c_from, c_to):
+def cspace_transform(img, c_from, c_to) -> ndarray:
+    """ Transforms any image from one color space to another, if possible. Only makes a copy if new color space. """
     if c_to != c_from:
         conversion = getattr(cv2, 'COLOR_{}2{}'.format(c_from, c_to))
         feature_image = cv2.cvtColor(img, conversion)
@@ -19,6 +28,12 @@ def cspace_transform(img, c_from, c_to):
 
 
 def get_hog_features(img, orientations, pixels_per_cell_edge, cells_per_block_edge, c_from, c_to, channels='ALL'):
+    """
+    Performs standard HOG feature extraction, but on multiple color channels and with optional color space conversion.
+
+    Parameters `c_from` and `c_to` allow for color space conversion before running.
+    Returns a numpy array with each entry containing the HOG map for each color channel.
+    """
     # Apply color conversion
     img = cspace_transform(img, c_from, c_to)
 
@@ -42,12 +57,21 @@ def get_hog_features(img, orientations, pixels_per_cell_edge, cells_per_block_ed
 
 
 def bin_color_spatial(img, c_from, c_to, size=(32, 32)):
+    """ Returns a feature vector containing the color intensity of the image in spatial order.
+
+    Parameters `c_from` and `c_to` allow for color space conversion before running.
+    Changing `size` allows for spatial binning via resizing the image.
+    """
     img = cspace_transform(img, c_from, c_to)
     features = cv2.resize(img, size).ravel()
     return features
 
 
 def color_hist(img, c_from, c_to, nbins=32, bins_range=(0, 256), channels='ALL'):
+    """ Returns the concatenation of color intensity histograms for each specified color channel.
+
+    Parameters `c_from` and `c_to` allow for color space conversion before running.
+    """
     # Select channels to include
     img = cspace_transform(img, c_from, c_to)
     if channels == 'ALL':
@@ -63,15 +87,22 @@ def color_hist(img, c_from, c_to, nbins=32, bins_range=(0, 256), channels='ALL')
     return np.concatenate(histograms)
 
 
-T = TypeVar('T')
-V = TypeVar('V')
-
-
 def generate_feature_vectors(samples, extractor_funcs, extractor_func_names, preprocessor_func=None,
                              feature_scaler=None, normalize_samples=False, verbose=0):
     """
+    Runs feature extraction pipeline as defined by given preprocessor_func and extractor_funcs. Returns data array X.
+
+    For each sample:
+        1. Pass the sample through the `preprocessor_func`
+        2. Pass the result of the preprocessor through each function in `extractor_funcs` and concatenate the results
+            * Optionally, normalize the samples before concatenation.
+        3. Optionall, normalize across features with the given StandardScaler
+
+    In addition, this routine returns various diagnostic information if `verbose` is set greater than zero.
+
     :type verbose: int
     :type preprocessor_func: Callable[[T], V]
+    :type feature_scaler: sklearn.preprocessing.StandardScaler
     :type extractor_func_names: List[str]
     :type extractor_funcs: List[Callable[[V], ndarray]]
     :type samples: List[T]
@@ -122,8 +153,8 @@ def generate_feature_vectors(samples, extractor_funcs, extractor_func_names, pre
             X[i, start:stop] = features
             start = stop
 
+    # Normalize over features? (column wise)
     if feature_scaler is not None:
-        # Normalize over features (column wise).
         X = feature_scaler.transform(X)
 
     if verbose >= 2:
@@ -134,17 +165,42 @@ def generate_feature_vectors(samples, extractor_funcs, extractor_func_names, pre
 
 class CarFeatureVectorBuilder:
     def __init__(self, clf_img_shape=(64, 64, 3), feature_scaler=None):
+        """
+        Central interface to tuning feature extraction specifically for cars vs not-cars.
+
+        The self.feature_scaler member allows for passing in a sklearn StandardScaler obtained during training so that
+        all future calls to get_features() return feature vectors that are normalized in the same way.
+
+        CarFeatureVectorBuilder is capable of running on both file names and images with precomputed hog features. See
+        self.get_features() for more info.
+
+        :param clf_img_shape: Image shape expected by the classifier.
+        :param feature_scaler: A sklearn StandardScaler to use in feature extraction.
+        """
         # Read in and check parameters
         self.feature_scaler = feature_scaler
         self.input_img_shape = clf_img_shape
         assert clf_img_shape[0] == clf_img_shape[1], "CarFeatureVectorBuilder requires square image input."
 
         # Global feature extraction settings.
-        self.cspace_default = 'YCrCb'
+        self.cspace_def = 'YCrCb'  # default color space (to convert to during preprocessing)
         self.hog_param = {'orientations': 9, 'pixels_per_cell_edge': 8, 'cells_per_block_edge': 2, 'c_from': 'RGB',
                           'c_to': 'YCrCb', 'channels': 'ALL'}
 
+        # Set up extractors. All will expect input to be a tuple (image_patch, hog_features).
+        self.feat_extract_funcs = [lambda sample: sample[1].ravel(),
+                                   lambda sample: bin_color_spatial(sample[0], c_from=self.cspace_def, c_to='YCrCb'),
+                                   lambda sample: color_hist(sample[0], c_from=self.cspace_def, c_to='YCrCb')]
+        self.extractor_func_names = ['HOG features', 'Spatial histogram', ' Color histogram']
+
     def get_features(self, samples, verbose=0):
+        """
+        Returns a data array X containing the feature vector for each given sample.
+
+        `samples` can be either:
+            * a list of file names, in which case all features will be automatically calculated, or
+            * a tuple containing an image and pre-computed hog features. Image should be in RGB color space.
+        """
         # Set up preprocessor.
         if isinstance(samples[0], str):
             preprocess = self._preprocess_files
@@ -153,21 +209,13 @@ class CarFeatureVectorBuilder:
         else:
             raise Exception('Sample not formatted correctly.')
 
-        # Set up extractors. All will expect input to be a tuple (image_patch, hog_features).
-        extractor_func_names = ['HOG features', 'Spatial histogram', ' Color histogram']
-        feat_extract_funcs = [lambda sample: sample[1].ravel(),
-                              lambda sample: bin_color_spatial(sample[0], c_from=self.cspace_default, c_to='YCrCb'),
-                              lambda sample: color_hist(sample[0], c_from=self.cspace_default, c_to='YCrCb')]
-
         # Extract features
-        X = generate_feature_vectors(samples, feat_extract_funcs, extractor_func_names, preprocess,
+        X = generate_feature_vectors(samples, self.feat_extract_funcs, self.extractor_func_names, preprocess,
                                      self.feature_scaler, verbose=verbose)
         return X
 
     def _preprocess_img_hog(self, sample: Tuple[ndarray, ndarray]):
-        """
-        img should be RGB
-        """
+        """ Preprocessor used by `self.get_features()` when samples are (img, hog) pairs. """
         img, hog = sample
         assert img.dtype == 'uint8', 'CarFeatureVectorBuilder is initialized uint8 images, not {}'.format(img.dtype)
         assert img.shape == self.input_img_shape, 'CarFeatureVectorBuilder is initialized for images of shape' \
@@ -176,11 +224,12 @@ class CarFeatureVectorBuilder:
         l, a, b = cv2.split(cv2.cvtColor(img, cv2.COLOR_RGB2LAB))
         cv2.normalize(l, l, 0, 255, cv2.NORM_MINMAX)
         img = cspace_transform(cv2.merge((l, a, b)), 'LAB', 'RGB')
-        img = cspace_transform(img, 'RGB', self.cspace_default)
+        img = cspace_transform(img, 'RGB', self.cspace_def)
 
         return img, hog
 
     def _preprocess_files(self, sample: str):
+        """ Preprocessor used by `self.get_features()` when samples are files. """
         img = cv2.imread(sample)
         cv2.cvtColor(img, cv2.COLOR_BGR2RGB, dst=img)
         hog = get_hog_features(img, **self.hog_param).ravel()
