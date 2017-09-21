@@ -19,7 +19,7 @@ from numpy import ndarray
 from scipy.ndimage.measurements import label
 from sklearn.externals import joblib
 
-from feature_extraction import CarFeatureVectorBuilder, get_hog_features
+from feature_extraction import CarFeatureVectorBuilder
 
 Rectangle = Tuple[Tuple[int, int], Tuple[int, int]]
 '''A pair of (x, y) vertices defining a rectangle.'''
@@ -176,7 +176,7 @@ class CarFinder:
             img = cv2.resize(img, (int(img_w / window_scale), int(img_h / window_scale)))
 
         # Calculate hog blocks for each desired image channel
-        hog_channels = get_hog_features(img, **self.fvb.hog_param)
+        hog_channels = self.fvb.hog_features(img)
 
         # Number of hog blocks for this image in the xy direction
         nblocks_x = hog_channels[0].shape[1]
@@ -184,9 +184,9 @@ class CarFinder:
 
         # The number of blocks we need per window (as required by classifier).
         window_size = self.fvb.input_img_shape[0]
-        cells_per_window_edge = window_size // self.fvb.hog_param['pixels_per_cell_edge']
+        cells_per_window_edge = window_size // self.fvb.hog_params['pixels_per_cell_edge']
         blocks_per_window_edge = \
-            cells_per_window_edge - self.fvb.hog_param['cells_per_block_edge'] + 1
+            cells_per_window_edge - self.fvb.hog_params['cells_per_block_edge'] + 1
 
         # Load all images and hog features
         window_imgs = []
@@ -201,8 +201,8 @@ class CarFinder:
                 window_hogs.append(hog_channels[:, yb_begin:yb_end, xb_begin:xb_end].ravel())
 
                 # Get image patch for this window
-                x_px_begin = xb_begin * self.fvb.hog_param['pixels_per_cell_edge']
-                y_px_begin = yb_begin * self.fvb.hog_param['pixels_per_cell_edge']
+                x_px_begin = xb_begin * self.fvb.hog_params['pixels_per_cell_edge']
+                y_px_begin = yb_begin * self.fvb.hog_params['pixels_per_cell_edge']
                 x_px_end, y_px_end = [begin + window_size for begin in (x_px_begin, y_px_begin)]
                 window_imgs.append(
                     cv2.resize(img[y_px_begin:y_px_end, x_px_begin:x_px_end], self.fvb.input_img_shape[:2]))

@@ -96,7 +96,7 @@ def generate_feature_vectors(samples, extractor_funcs, extractor_func_names, pre
         1. Pass the sample through the `preprocessor_func`
         2. Pass the result of the preprocessor through each function in `extractor_funcs` and concatenate the results
             * Optionally, normalize the samples before concatenation.
-        3. Optionall, normalize across features with the given StandardScaler
+        3. Optionally, normalize across features with the given StandardScaler
 
     In addition, this routine returns various diagnostic information if `verbose` is set greater than zero.
 
@@ -184,8 +184,8 @@ class CarFeatureVectorBuilder:
 
         # Global feature extraction settings.
         self.cspace_def = 'YCrCb'  # default color space (to convert to during preprocessing)
-        self.hog_param = {'orientations': 9, 'pixels_per_cell_edge': 8, 'cells_per_block_edge': 2, 'c_from': 'RGB',
-                          'c_to': 'YCrCb', 'channels': 'ALL'}
+        self.hog_params = {'orientations': 9, 'pixels_per_cell_edge': 8, 'cells_per_block_edge': 2, 'c_from': 'RGB',
+                           'c_to': 'YCrCb', 'channels': 'ALL'}
 
         # Set up extractors. All will expect input to be a tuple (image_patch, hog_features).
         self.feat_extract_funcs = [lambda sample: sample[1].ravel(),
@@ -199,7 +199,8 @@ class CarFeatureVectorBuilder:
 
         `samples` can be either:
             * a list of file names, in which case all features will be automatically calculated, or
-            * a tuple containing an image and pre-computed hog features. Image should be in RGB color space.
+            * a tuple containing an image and pre-computed hog features. Image should be in RGB color space. HOG
+              features should be obtained by self.hog_features().
         """
         # Set up preprocessor.
         if isinstance(samples[0], str):
@@ -215,7 +216,8 @@ class CarFeatureVectorBuilder:
         return X
 
     def _preprocess_img_hog(self, sample: Tuple[ndarray, ndarray]):
-        """ Preprocessor used by `self.get_features()` when samples are (img, hog) pairs. """
+        """ Preprocessor used by `self.get_features()` when samples are (img, hog) pairs.
+        Image should be in RGB color space."""
         img, hog = sample
         assert img.dtype == 'uint8', 'CarFeatureVectorBuilder is initialized uint8 images, not {}'.format(img.dtype)
         assert img.shape == self.input_img_shape, 'CarFeatureVectorBuilder is initialized for images of shape' \
@@ -232,5 +234,9 @@ class CarFeatureVectorBuilder:
         """ Preprocessor used by `self.get_features()` when samples are files. """
         img = cv2.imread(sample)
         cv2.cvtColor(img, cv2.COLOR_BGR2RGB, dst=img)
-        hog = get_hog_features(img, **self.hog_param).ravel()
+        hog = self.hog_features(img).ravel()
         return self._preprocess_img_hog((img, hog))
+
+    def hog_features(self, img):
+        """ Returns HOG features for the given image, using the HOG settings from self.hog_params for consistency. """
+        return get_hog_features(img, **self.hog_params)
