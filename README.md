@@ -22,6 +22,8 @@ You can find the full video output on [YouTube](https://www.youtube.com/watch?v=
 along with a [diagnostic view](https://www.youtube.com/watch?v=wKw9EWHOrDI) showing the per-frame
 detections and heat map.
 
+---
+
 ## Installation
 
 ### This Repository
@@ -49,7 +51,7 @@ This project utilizes the following, easy to obtain software:
 
 An easy way to obtain these is with the [Udacity CarND-Term1-Starter-Kit](https://github.com/udacity/CarND-Term1-Starter-Kit) and Anaconda. To do so, run the following (or see the [full instructions](https://github.com/udacity/CarND-Term1-Starter-Kit/blob/master/doc/configure_via_anaconda.md)):
 
-```sh
+```
 git clone https://github.com/udacity/CarND-Term1-Starter-Kit.git
 cd CarND-Term1-Starter-Kit
 conda env create -f environment.yml
@@ -58,7 +60,7 @@ activate carnd-term1
 
 And then install the rest (while still in that environment) by running:
 
-```sh
+```
 pip install imagehash
 ```
 
@@ -71,13 +73,15 @@ If you want to re-train the classifier with new feature vectors, you will need t
 
 If you place the top level `vehicles` and `non-vehicles` folders from these zip files in the `./data/` folder, all of the programs should be able to find them with the default arguments.
 
+---
+
 ## Basic Usage
 
 If all you want to do is run the pre-trained classifier on a video, all you need to do is run `find_cars.py`. There are a bunch of different options for running it, but they are all optional.
 
 To find cars in a specific video (such as the ones in `./data/test_videos/`), run:
 
-```sh
+```
 python find_cars.py -vi <input_video_path> -vo <output_video_save_path>
 ```
 
@@ -95,7 +99,7 @@ The level of uniqueness is set by the `MIN_HAMMING_DISTANCE` parameter. This def
 
 Usage can be found with the help command:
 
-```sh
+```
 $ python clean_dataset.py -h
 usage: clean_dataset.py [-h] [-hd MIN_HAMMING_DISTANCE] [-lm LIMIT]
                         load_path save_path
@@ -123,27 +127,27 @@ There are multiple ways to train the classifier for a particular set of samples.
 
 To train using 1000 randomly selected samples from the unique image list made by `clean_dataset.py`, run:
 
-```sh
+```
 python train.py -sz 1000 -cf unique_vehicles.pkl -ncf unique_non-vehicles.pkl
 ```
 
-##### From pre-generated feature vectors
+**From pre-generated feature vectors**
 
 When you run `train.py` it will save the feature vectors and labels to a single pickle file prior to running SVM training. After extracting these the first time, you do not need to extract them again, unless you change the characteristics of the feature vector.
 
 To go straight to SVM training using the feature vectors, run:
 
-```sh
+```
 python train.py -xylf Xy.pkl
 ```
 
-##### From file path
+**From file path**
 
 With no parameters given, the training program will select from all the images in `./data/vehicles` and `./data/non-vehicles`. Use the `-sz` parameter to limit the number of samples selected.
 
-##### Additional Options
+**Additional Options**
 
-```sh
+```
 $ python train.py -h
 usage: train.py [(-cf & -ncf)? -sz | -xylf ] [additional options]
 
@@ -180,17 +184,21 @@ optional arguments:
 
 ### Finding cars in video
 
+**From File**
+
 By default `find_cars.py` will use the classifier found at `./data/trained_classifier.pkl` and feature scaler found at `./Xy_scaler.plk`. These files are included in the repository, and also happen to be the default save location of `train.py`, where these files come from.
 
 Thus, to find cars, all you need to do is run the following, as mentioned before.
 
-```sh
+```
 python find_cars.py -vi <input_video_path> -vo <output_video_save_path>
 ```
 
+**Additional Options**
+
 There are a variety of different options shown below. One particularly interesting option is `--visualization` . If you set this to `windows` you will get a diagnostic view of the tracking pipeline, which reveals per frame detections and heatmap in addition to the car bounding box selections.
 
-```sh
+```
 $ python find_cars.py -h
 usage: find_cars.py [ -vi & -vo | -img ]? [extra_options]
 
