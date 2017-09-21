@@ -1,11 +1,10 @@
-# Vehicle Detection [![Udacity - Self-Driving Car NanoDegree](https://s3.amazonaws.com/udacity-sdc/github/shield-carnd.svg)](http://www.udacity.com/drive)
+# Vehicle Detector [![Udacity - Self-Driving Car NanoDegree](https://s3.amazonaws.com/udacity-sdc/github/shield-carnd.svg)](http://www.udacity.com/drive)
 
-![car-detect](data/documnetation_imgs/car-detect.gif)
+![car-detect](data/documentation_imgs/car-detect.gif)
 
-![car-diagnostic-equal](data/documnetation_imgs/car-diagnostic-equal.gif)
+![car-diagnostic-equal](data/documentation_imgs/car-diagnostic-equal.gif)
 
-The Project
----
+## The Project
 
 The goals I set for this project (expanding on the basic goals set by Udacity) were to:
 
@@ -18,42 +17,23 @@ The goals I set for this project (expanding on the basic goals set by Udacity) w
 * **Search for vehicles** using the SVM and a **sliding-window technique**.
 * Estimate a bounding box for vehicles detected.
 
-# Installation
+#### Video Results
+You can find the full video output on [YouTube](https://www.youtube.com/watch?v=GmLn8OzekBA)
+along with a [diagnostic view](https://www.youtube.com/watch?v=wKw9EWHOrDI) showing the per-frame
+detections and heat map.
 
-# Highway Lane Tracker  [![img](https://s3.amazonaws.com/udacity-sdc/github/shield-carnd.svg)](http://www.udacity.com/drive)
+## Installation
 
-![img](file://C:\Users\Peter\Documents\GitHub\CarND-Advanced-Lane-Lines\data\documentation_imgs\project_video_clip.gif?lastModify=1506009636)
-
-![img](file://C:\Users\Peter\Documents\GitHub\CarND-Advanced-Lane-Lines\data\documentation_imgs\challenge_video_clip.gif?lastModify=1506009636)
-
-### Writeup & Full Videos
-
-Check out the full project [writeup and test videos at my blog](http://petermoran.org/robust-lane-tracking/)! I gointo a full breakdown of the system's capabilities and the choices Imade.
-
-# The Project
-
-The goals of this project were to:
-
-- Calibrate cameras and apply distortion correction to raw images.
-- Apply a perspective transform to get an overhead perspective of the road.
-- Detect lane pixels.
-- Filter out the noise and determine a stable mathematical fit to the lane.
-- Determine the vehicle position in the lane and the lane curvature.
-
----
-
-# Installation
-
-## This Repository
+### This Repository
 
 Download this repository by running:
 
 ```sh
-git clone https://github.com/peter-moran/vehicle-tracker.git
-cd vehicle-tracker
+git clone https://github.com/peter-moran/vehicle-detector.git
+cd vehicle-detector
 ```
 
-## Software Dependencies
+### Software Dependencies
 
 This project utilizes the following, easy to obtain software:
 
@@ -82,7 +62,7 @@ And then install the rest (while still in that environment) by running:
 pip install imagehash
 ```
 
-## Data Dependencies
+### Data Dependencies
 
 If you want to re-train the classifier with new feature vectors, you will need the original datasets to extract features from. They each contain over 8000 samples of 64x64 images of vehicles vs not vehicle images. These images were given by Udacity and come from a combination of the [GTI vehicle image database](http://www.gti.ssr.upm.es/data/Vehicle_database.html), the [KITTI vision benchmark suite](http://www.cvlibs.net/datasets/kitti/), and examples extracted from the test video itself. 
 
@@ -90,10 +70,6 @@ If you want to re-train the classifier with new feature vectors, you will need t
 * [Non-vehicle](https://s3.amazonaws.com/udacity-sdc/Vehicle_Tracking/non-vehicles.zip) data set.
 
 If you place the top level `vehicles` and `non-vehicles` folders from these zip files in the `./data/` folder, all of the programs should be able to find them with the default arguments.
-
----
-
-# Usage
 
 ## Basic Usage
 
@@ -143,7 +119,7 @@ optional arguments:
 
 There are multiple ways to train the classifier for a particular set of samples.
 
-##### From pre-selected samples
+**From pre-selected samples**
 
 To train using 1000 randomly selected samples from the unique image list made by `clean_dataset.py`, run:
 
