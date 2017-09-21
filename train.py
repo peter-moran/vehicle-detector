@@ -29,15 +29,23 @@ def main():
     # Read arguments
     parser = argparse.ArgumentParser(description='Train classifier for cars vs not-cars.',
                                      usage='%(prog)s [(-cf & -ncf)? -sz | -xylf ] [additional options]')
-    parser.add_argument('-sz', '--sample_size', type=int)
-    parser.add_argument('-xylf', '--xy_loadfile', type=str)
-    parser.add_argument('-cf', '--car_pickle_file', type=str)
-    parser.add_argument('-ncf', '--notcar_pickle_file', type=str)
-    parser.add_argument('-ti', '--train_iters', type=int, default=10)
-    parser.add_argument('-tj', '--train_jobs', type=int, default=4)
-    parser.add_argument('-clf', '--clf_savefile', type=str, default='./data/trained_classifier.pkl')
-    parser.add_argument('-xysf', '--xy_savefile', type=str, default='./data/Xy.pkl')
-    parser.add_argument('-sr', '--save_remainder', type=bool, default=False)
+    parser.add_argument('-sz', '--sample_size', type=int, help='Number of samples to use from both -cf and -ncf.')
+    parser.add_argument('-cf', '--car_pickle_file', type=str,
+                        help='File path to .pkl containing a list of image files to use as cars.')
+    parser.add_argument('-ncf', '--notcar_pickle_file', type=str,
+                        help='File path to .pkl containing a list of image files to use as notcars.')
+    parser.add_argument('-xylf', '--xy_loadfile', type=str,
+                        help='File path to .pkl containing existing feature vectors and labels as tuple (X, y).')
+    parser.add_argument('-ti', '--train_iters', type=int, default=10,
+                        help='Number of iterations to use for the SVM parameter search.')
+    parser.add_argument('-tj', '--train_jobs', type=int, default=4,
+                        help='Number of processes to use for the SVM parameter search.')
+    parser.add_argument('-clf', '--clf_savefile', type=str, default='./data/trained_classifier.pkl',
+                        help='Location to save the classifier.')
+    parser.add_argument('-xysf', '--xy_savefile', type=str, default='./data/Xy.pkl',
+                        help='Location to save the extracted feature vectors and labels used in training as a .pkl.')
+    parser.add_argument('-sr', '--save_remainder', type=bool, default=False,
+                        help="Set 'True' to also extract the unused features and save them to a .pkl file.")
     args = parser.parse_args()
     if args.save_remainder and args.sz is None:
         parser.error("--save_remainder requires using --sample_size.")
