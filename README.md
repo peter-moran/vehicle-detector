@@ -1,12 +1,10 @@
 # Vehicle Detector [![Udacity - Self-Driving Car NanoDegree](https://s3.amazonaws.com/udacity-sdc/github/shield-carnd.svg)](http://www.udacity.com/drive)
 
-<a align="center" href="http://petermoran.org"><img src="https://img.shields.io/badge/Peter%20Moran's%20Blog-Find_more_projects_at_my_website-blue.svg?style=social"></a>
+<p align="center"><a href="http://petermoran.org"><img src="https://img.shields.io/badge/Peter%20Moran's%20Blog-Find_more_projects_at_my_website-blue.svg?style=social"></a></p>
 
+<p align="center"><img src="data/documentation_imgs/car-detect.gif"></p> 
 
-![car-detect](data/documentation_imgs/car-detect.gif)
-
-![car-diagnostic-equal](data/documentation_imgs/car-diagnostic-equal.gif)
-
+<p align="center"><img src="data/documentation_imgs/car-diagnostic-equal.gif"></p> 
 
 # The Project
 
@@ -25,25 +23,25 @@ My goals for this project were to:
 
 This vehicle detector uses a sliding window search with a nonlinear SVM to classify different window in an image as containing a car or not. From that, we integrate over time to remove false positive classifications. Before I can discuss the detection pipeline, however, I'll need to explain the sample selection and training process.
 
-**Sample Selection**
+### Sample Selection
 
 For the project, just over 8000 64x64px combined images of vehicles and not-vehicle classes were provided (discussed further below). Because these samples come from video, **many of the images appear near-identical** due to consecutive fames of video looking very similar. Rather than training with this dataset, which would result in artificially high validation accuracy or lead to a less diverse training set, I removed near-duplicate images. This is done by `clean_dataset.py`, which uses an image hashing algorithm to inspect each image one at a time and reject any new images that do not have a great enough hamming distance from the previously observed image hashes. After tuning this to provide a decent balance of diversity and sample quantity, I had ~2800 samples of vehicles and non-vehicles (with 50% from each class).
 
-**Feature Extraction & Training**
+### Feature Extraction & Training
 
 Before training the SVM, I needed to obtain feature vectors for each image to train with. This is done by `CarFeatureVectorBuilder` in `feature_extraction.py` which is highly flexible and allow for quick re-tuning of feature extraction all in one place, including the ability to add new types of features. The current implementation pre-converts all images to the YCrCb color space and then combines Histogram of Oriented Gradients (HOG), color histogram, and spatial color features into a single feature vector containing 8460 features.
 
 Next, I extracted the features from my selected samples and performed a random parameter search to tune the rbf-kernel SVM, which runs the SVM with various different settings for the `C` and `gamma` hyper parameters. The best parameterization used `C=65.1` and `gamma=.0000882` and has a 89.2% accuracy when tested on the culled subset of unique images.
 
-**Detection**
+### Detection
 
 Once the SVM is trained, different segments of the image are classified as car or not-car by using three different scales of a sliding window search, with the SVM classifying the contents of each window. Scaling allows us to detect vehicles of different sizes and distances. Below is an example of the window classifications in a single video frame. The blue boxes are 'vehicle' windows and the green boxes are the extents of the detected cars.
 
-<img src="data/documentation_imgs/windows.png" width="500" align="center">
+<p align="center"><img src="data/documentation_imgs/windows.png" width="500"></p>
 
 False positive classifications are not uncommon frame by frame. We filter these out by accumulating a 16 frame heat map, which is the combination of each widow classified as a vehicle where each one contributes a magnitude of heat proportional to the SVM's confidence of that classification. 
 
-<img src="data/documentation_imgs/car-diagnostic.gif" width="400" align="center">
+<p align="center"><img src="data/documentation_imgs/car-diagnostic.gif" width="400"></p>
 
 Next, we remove any pixels from the accumulated heatmap with an intensity below a certain threshold, label the connected regions in the heatmap using `scipy.ndimage.measurements.label()`, and find a bounding box that contains all of the pixels in that region. When we do this, we also check the intensity of the heatmap at the very center of that bounding box. If the intensity is below some upper threshold then the label region is not used. This has a similar effect to hysteresis thresholding and ensures we use only the strongest regions with the most overlapping classifications, but also allows us to use the full extent of that connected region. The bounding boxes for the approved regions are then considered detected cars and are drawn in the video output.
 
@@ -57,7 +55,7 @@ In the final output and in the [diagnostic video](https://www.youtube.com/watch?
 This system has some areas to improve. Because the classifier was trained using full body images of vehicles, it cannot detect vehicles that are partially occluded. This especially delays it from quickly detecting new cars entering from the side of the image. In a real world system where fast identification is needed, it would be better to train the classifier to also identify partial or occluded vehicles, or use a dedicated classifier for doing this around the image's edge. A deep learning approach may provide even better results too. Secondly, the detector cannot distinguish multiple instances of a vehicle when their bounding boxes overlap. This means for any selected bounding box, we can only be confident there is one *or more* cars contained in it, rather than just a single car.
 
 
-<a align="center" href="https://www.youtube.com/watch?v=xIOZcZ6eihM"><img src="data/documentation_imgs/video-play.png" width="350px"></a>	
+<p align="center"><a href="https://youtu.be/GmLn8OzekBA"><img src="data/documentation_imgs/video-play.png" width="350px"></a></p>
 
 ---
 
