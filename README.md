@@ -1,6 +1,6 @@
 # Vehicle Detector [![Udacity - Self-Driving Car NanoDegree](https://s3.amazonaws.com/udacity-sdc/github/shield-carnd.svg)](http://www.udacity.com/drive)
 
-<p align="center"><a href="http://petermoran.org"><img src="https://img.shields.io/badge/Peter%20Moran's%20Blog-Find_more_projects_at_my_website-blue.svg?style=social"></a></p>
+<p align="left"><a href="http://petermoran.org"><img src="https://img.shields.io/badge/Peter%20Moran's%20Blog-Find_more_projects_at_my_website-blue.svg?style=social"></a></p>
 
 <p align="center"><img src="data/documentation_imgs/car-detect.gif"></p> 
 
